@@ -7,17 +7,37 @@
  */
 import { BrowserWindow, ipcMain } from 'electron'
 
+import { getLogger } from '../logger'
 import type { ServerController } from './controller'
 import type { ClientRelayService } from '../client-relay/service'
 import { ClientIpc } from '../client-relay/ipc-channels'
 import { ServerEvents, ServerIpc } from './ipc-channels'
 
-export function registerServerBridgeIpc(controller: ServerController): void {
-  const handle = (channel: string, fn: (...args: never[]) => unknown): void => {
-    ipcMain.handle(channel, (_event, ...args: unknown[]) =>
-      (fn as (...a: unknown[]) => unknown)(...args),
-    )
+/**
+ * Wraps a handler so failures are logged (file + console) before the
+ * rejection reaches the renderer. Without this, packaged-app IPC errors
+ * vanish silently and leave an empty console to debug against.
+ */
+function makeHandle(): (channel: string, fn: (...args: never[]) => unknown) => void {
+  return (channel, fn) => {
+    ipcMain.handle(channel, async (_event, ...args: unknown[]) => {
+      try {
+        return await (fn as (...a: unknown[]) => unknown)(...args)
+      } catch (error) {
+        try {
+          getLogger().error({ err: error, channel }, 'IPC handler failed')
+        } catch {
+          /* logger not initialized yet */
+        }
+        console.error(`[ipc:${channel}]`, error)
+        throw error
+      }
+    })
   }
+}
+
+export function registerServerBridgeIpc(controller: ServerController): void {
+  const handle = makeHandle()
 
   handle(ServerIpc.getWorkingFolderStatus, () => controller.getWorkingFolderStatus())
   handle(ServerIpc.setWorkingFolderPath, (p: unknown) =>
@@ -79,11 +99,7 @@ export function registerServerBridgeIpc(controller: ServerController): void {
 }
 
 export function registerClientBridgeIpc(client: ClientRelayService): void {
-  const handle = (channel: string, fn: (...args: never[]) => unknown): void => {
-    ipcMain.handle(channel, (_event, ...args: unknown[]) =>
-      (fn as (...a: unknown[]) => unknown)(...args),
-    )
-  }
+  const handle = makeHandle()
 
   handle(ClientIpc.getConnection, () => client.getConnection())
   handle(ClientIpc.pair, (host: unknown, port: unknown, code: unknown) =>

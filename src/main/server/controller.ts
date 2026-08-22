@@ -63,6 +63,13 @@ import {
 const ACTIVE_JOB_POLL_MS = 1000;
 const QBIT_PROBE_TTL_MS = 15_000;
 
+/** Accepts bare "host:port" forms and defaults them to http:// (qBittorrent WebUI). */
+function normalizeQbitBaseUrl(raw: string): string {
+  const trimmed = raw.trim();
+  if (!trimmed || /^[a-z][a-z0-9+.-]*:\/\//i.test(trimmed)) return trimmed;
+  return `http://${trimmed}`;
+}
+
 export interface ServerControllerOptions {
   host: CompositionHost;
   /** Invoked when the renderer requests app exit (confirmation is the UI's job). */
@@ -141,15 +148,30 @@ export class ServerController implements VikingRelayServerBridge {
   }
 
   async probeQbittorrent(config: { webUiUrl: string; apiKey?: string }): Promise<QbitProbeResult> {
-    const url = String(config.webUiUrl ?? '').trim();
+    const url = normalizeQbitBaseUrl(String(config.webUiUrl ?? ''));
     if (!/^https?:\/\//i.test(url)) {
       return { ok: false, reason: 'invalid_url', message: 'WebUI URL must be an http(s) URL' };
     }
-    const service = new QbitTorrentService({ baseUrl: url, apiKey: config.apiKey });
+    try {
+      new URL(url);
+    } catch {
+      return { ok: false, reason: 'invalid_url', message: 'WebUI URL must be an http(s) URL' };
+    }
+    const apiKey = config.apiKey ?? this.#host.secrets.get(SECRET_QBIT_API_KEY) ?? undefined;
+    const service = new QbitTorrentService({ baseUrl: url, apiKey });
     try {
       const caps = await service.healthCheck();
+      this.#host.log.info({ url }, 'qBittorrent probe succeeded');
       return { ok: true, version: caps.qbtVersion, supported: true };
     } catch (error) {
+      this.#host.log.warn(
+        {
+          err: error,
+          url,
+          keySource: config.apiKey ? 'request' : apiKey !== undefined ? 'stored' : 'none',
+        },
+        'qBittorrent probe failed',
+      );
       if (error instanceof QbitUnreachableError) {
         return {
           ok: false,
@@ -161,7 +183,9 @@ export class ServerController implements VikingRelayServerBridge {
         return {
           ok: false,
           reason: 'auth',
-          message: 'qBittorrent rejected the API key.',
+          message: apiKey
+            ? 'qBittorrent rejected the API key.'
+            : 'No API key configured yet — create one in qBittorrent (Web UI settings) and paste it above.',
         };
       }
       if (error instanceof QbitUnsupportedVersionError) {
@@ -329,7 +353,9 @@ export class ServerController implements VikingRelayServerBridge {
     if (patch.workingFolderPath !== undefined) mapped.dataDir = patch.workingFolderPath;
     if (patch.radminInterfaceId !== undefined) mapped.radminInterfaceId = patch.radminInterfaceId;
     if (patch.relayPort !== undefined) mapped.serverPort = patch.relayPort;
-    if (patch.qbitWebUiUrl !== undefined) mapped.qbittorrentBaseUrl = patch.qbitWebUiUrl;
+    if (patch.qbitWebUiUrl !== undefined) {
+      mapped.qbittorrentBaseUrl = normalizeQbitBaseUrl(patch.qbitWebUiUrl);
+    }
     if (patch.startWithWindows !== undefined) mapped.startWithWindows = patch.startWithWindows;
     if (patch.preventSleepDuringTransfers !== undefined) {
       mapped.preventSleepDuringTransfers = patch.preventSleepDuringTransfers;

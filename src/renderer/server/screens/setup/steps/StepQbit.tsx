@@ -16,7 +16,8 @@ export function StepQbit({ bridge, state, dispatch }: StepProps) {
       }
       const result = await bridge.probeQbittorrent({ webUiUrl: state.qbitUrl });
       dispatch({ type: "QBIT_PROBE_RESULT", result });
-    } catch {
+    } catch (error) {
+      console.error("qBittorrent probe failed", error);
       dispatch({
         type: "QBIT_PROBE_RESULT",
         result: { ok: false, reason: "unknown", message: "Could not run the test." },
