@@ -3,10 +3,24 @@ import type { AppState } from '@shared/ipc'
 import ClientApp from '../client'
 import ServerApp from '../server'
 import ModeChooser from './ModeChooser'
+import { GlobalSettingsModal } from './GlobalSettingsModal'
 
 export default function App(): React.JSX.Element {
   const [state, setState] = useState<AppState | null>(null)
   const [bridgeMissing, setBridgeMissing] = useState(false)
+  const [settingsOpen, setSettingsOpen] = useState(false)
+
+  useEffect(() => {
+    // Surface main-process failures in the DevTools console (issue: "console
+    // is empty so we've resorted to speculating").
+    const off = window.vikingRelay?.onLog((entry) => {
+      const line = `[viking-relay:${entry.level}] ${entry.msg}`
+      if (entry.level === 'error') console.error(line)
+      else if (entry.level === 'warn') console.warn(line)
+      else console.info(line)
+    })
+    return () => off?.()
+  }, [])
 
   useEffect(() => {
     if (!window.vikingRelay) {
@@ -48,6 +62,16 @@ export default function App(): React.JSX.Element {
           <span className="rounded bg-neutral-800 px-2 py-0.5 font-mono uppercase">
             {state.mode ?? 'unconfigured'}
           </span>
+          <button
+            type="button"
+            className="rounded border border-neutral-700 px-2 py-0.5 hover:bg-neutral-800"
+            onClick={() => setSettingsOpen(true)}
+            aria-label="Settings"
+            title="Settings (updates, logs)"
+            data-testid="global-settings-button"
+          >
+            ⚙ Settings
+          </button>
           {state.mode !== null && (
             <button
               type="button"
@@ -68,6 +92,7 @@ export default function App(): React.JSX.Element {
           <ServerApp />
         )}
       </main>
+      <GlobalSettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} />
     </div>
   )
 }

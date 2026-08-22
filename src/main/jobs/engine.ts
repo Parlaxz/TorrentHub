@@ -72,6 +72,9 @@ export class JobEngine {
     let marked = 0;
     for (const job of jobs) {
       if (isTerminalJobState(job.state)) continue;
+      // Drafts that never started a transfer survive restarts untouched —
+      // the user can still select files and start them.
+      if (job.state === "reading_metadata" || job.state === "awaiting_selection") continue;
       if (job.sessionEpoch === this.#epoch) continue; // current-session job
       job.state = "interrupted";
       job.lastKnownStage = lastNonWaitingStage(job.stages);
@@ -381,8 +384,15 @@ export class JobEngine {
     const pipeline = new TransferPipeline(this.#pipelineDeps(), record);
     this.#activePipeline = pipeline;
     this.#activeTransferJobId = record.id;
-    this.#transferChain = this.#transferChain.then(() =>
+    // Sanitize the chain AFTER each run: a rejected link must never poison
+    // subsequent transfers (they would silently never execute and later be
+    // swept to "interrupted").
+    const run = this.#transferChain.then(() =>
       this.#runTracked(pipeline, () => pipeline.run(), record.id),
+    );
+    this.#transferChain = run.then(
+      () => undefined,
+      () => undefined,
     );
   }
 
@@ -425,6 +435,14 @@ export class JobEngine {
         };
         await this.#save(record);
       }
+      this.#log.warn(
+        {
+          jobId,
+          state: record.state,
+          err: error instanceof Error ? { message: error.message, stack: error.stack } : String(error),
+        },
+        "transfer pipeline failed",
+      );
       throw error;
     } finally {
       if (this.#activeTransferJobId === jobId) this.#activeTransferJobId = null;

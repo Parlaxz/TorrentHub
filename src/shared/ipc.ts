@@ -86,6 +86,8 @@ export interface VikingRelayBridge {
   checkForUpdates(): Promise<UpdateState>
   /** Applies a downloaded update by restarting the app. */
   installUpdate(): Promise<UpdateState>
+  /** Main-process log mirror (warn/error) so failures reach the DevTools console. */
+  onLog(cb: (entry: { level: 'warn' | 'error' | 'info'; msg: string }) => void): () => void
 }
 
 declare global {

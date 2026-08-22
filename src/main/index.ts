@@ -2,7 +2,7 @@ import { app, nativeTheme, powerMonitor, session, shell, BrowserWindow, Menu, Tr
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { initAppPaths } from './app-paths'
-import { initLogger, getLogger } from './logger'
+import { initLogger, getLogger, attachWindowLogMirror } from './logger'
 import { AppSettingsStore } from './settings-store'
 import { SecretStore } from './secrets'
 import { registerIpcHandlers } from './ipc'
@@ -188,6 +188,9 @@ if (!gotLock) {
     settings = new AppSettingsStore(paths.settingsFile, log)
     const secrets = new SecretStore(paths.secretsFile, log)
 
+    // Mirror warn/error logs into every window's DevTools console.
+    attachWindowLogMirror(() => BrowserWindow.getAllWindows())
+
     const updater = new AppUpdater(log, app.getVersion())
     updater.checkOnStartup()
 
@@ -205,7 +208,9 @@ if (!gotLock) {
     })
 
     // Client Mode backend (token stays in main via safeStorage).
-    const clientRelay = new ClientRelayService(settings, secrets)
+    const clientRelay = new ClientRelayService(settings, secrets, {
+      warn: (obj, msg) => log.warn(obj, msg),
+    })
     registerClientBridgeIpc(clientRelay)
 
     // Server Mode composition + bridge.

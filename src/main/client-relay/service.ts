@@ -64,6 +64,7 @@ export class ClientRelayService {
   constructor(
     private readonly settings: AppSettingsStore,
     private readonly secrets: SecretStore,
+    private readonly log?: { warn: (obj: Record<string, unknown>, msg: string) => void },
   ) {}
 
   // ----------------------------------------------------------- connection
@@ -176,10 +177,21 @@ export class ClientRelayService {
       })
       const preflight = job.storagePreflight ?? job.preflight ?? null
       if (!preflight) {
+        this.log?.warn({ jobId }, 'start response carried no storage preflight')
         return { ok: false, error: 'server did not return a storage preflight' }
+      }
+      if (preflight.blocked) {
+        this.log?.warn(
+          { jobId, freeBytes: preflight.serverFreeBytes, requiredBytes: preflight.peakRequiredBytes },
+          'start blocked by server storage policy',
+        )
       }
       return { ok: true, value: preflight }
     } catch (error) {
+      this.log?.warn(
+        { jobId, err: error instanceof Error ? error.message : String(error) },
+        'confirm selection failed',
+      )
       return { ok: false, error: describe(error) }
     }
   }

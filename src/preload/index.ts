@@ -22,7 +22,13 @@ const bridge: VikingRelayBridge = {
   },
   getUpdateState: () => ipcRenderer.invoke(IpcChannels.updatesGetState),
   checkForUpdates: () => ipcRenderer.invoke(IpcChannels.updatesCheck),
-  installUpdate: () => ipcRenderer.invoke(IpcChannels.updatesInstall)
+  installUpdate: () => ipcRenderer.invoke(IpcChannels.updatesInstall),
+  onLog: (cb: (entry: { level: 'warn' | 'error' | 'info'; msg: string }) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, entry: { level: 'warn' | 'error' | 'info'; msg: string }): void =>
+      cb(entry)
+    ipcRenderer.on('app:log', listener)
+    return () => ipcRenderer.removeListener('app:log', listener)
+  }
 }
 
 contextBridge.exposeInMainWorld('vikingRelay', bridge)

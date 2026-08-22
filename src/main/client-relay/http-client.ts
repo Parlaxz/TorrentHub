@@ -117,7 +117,11 @@ export class RelayHttpClient {
       }
 
       if (!response.ok) {
-        const payload = (await safeJson(response)) as { error?: string; retryAfterMs?: number } | null
+        const payload = (await safeJson(response)) as {
+          error?: string
+          message?: string
+          retryAfterMs?: number
+        } | null
         const code = typeof payload?.error === 'string' ? payload.error : undefined
         const kind: RelayErrorKind =
           response.status === 404
@@ -134,7 +138,7 @@ export class RelayHttpClient {
           status: response.status,
           code,
           retryAfterMs: typeof payload?.retryAfterMs === 'number' ? payload.retryAfterMs : undefined,
-          message: humanizeApiError(kind, code, response.status),
+          message: humanizeApiError(kind, code, response.status, payload?.message),
         })
       }
 
@@ -158,7 +162,13 @@ async function safeJson(response: Response): Promise<unknown> {
   }
 }
 
-function humanizeApiError(kind: RelayErrorKind, code: string | undefined, status: number): string {
+function humanizeApiError(
+  kind: RelayErrorKind,
+  code: string | undefined,
+  status: number,
+  serverMessage?: string,
+): string {
+  const detail = typeof serverMessage === 'string' && serverMessage.trim() ? `: ${serverMessage.trim()}` : ''
   switch (code ?? kind) {
     case 'job_not_found':
       return 'that job no longer exists on the server'
@@ -172,7 +182,9 @@ function humanizeApiError(kind: RelayErrorKind, code: string | undefined, status
       return 'too many attempts — wait a moment and retry'
     case 'validation_error':
       return 'the server rejected this request as invalid'
+    case 'internal_error':
+      return `server error (${status})${detail || ' — check the server log for details'}`
     default:
-      return `server error (${status})`
+      return `server error (${status})${detail}`
   }
 }
