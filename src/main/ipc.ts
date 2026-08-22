@@ -7,6 +7,7 @@ import type { SecretStore } from './secrets'
 import type { AppSettingsStore } from './settings-store'
 import type { AppUpdater } from './updater'
 import type { DirectDownloadsService } from './client-relay/direct-downloads'
+import { applyLoginItem } from './login-item'
 
 interface IpcContext {
   store: AppSettingsStore
@@ -41,6 +42,8 @@ export function registerIpcHandlers(ctx: IpcContext): void {
       const patch = AppSettingsPatchSchema.parse(rawPatch)
       const next = ctx.store.update(patch)
       ctx.log.info({ patch: Object.keys(patch) }, 'settings updated')
+      // Keep the Windows login item in sync no matter which surface writes it.
+      if (patch.startWithWindows !== undefined) applyLoginItem(next.startWithWindows)
       return next
     },
 

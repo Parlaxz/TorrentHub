@@ -22,6 +22,7 @@ export function GlobalSettingsModal({
 }): React.JSX.Element | null {
   const [updateState, setUpdateState] = useState<UpdateState | null>(null)
   const [busy, setBusy] = useState(false)
+  const [startWithWindows, setStartWithWindows] = useState<boolean | null>(null)
   const [dd, setDd] = useState<DdState | null>(null)
   const [qbitUrlDraft, setQbitUrlDraft] = useState('')
   const [keyDraft, setKeyDraft] = useState('')
@@ -36,10 +37,28 @@ export function GlobalSettingsModal({
         if (!cancelled) setUpdateState(s)
       })
       .catch(() => {})
+    void window.vikingRelay
+      .getState()
+      .then((s) => {
+        if (!cancelled) setStartWithWindows(s.settings.startWithWindows)
+      })
+      .catch(() => {})
     return () => {
       cancelled = true
     }
   }, [open])
+
+  const toggleStartWithWindows = async (): Promise<void> => {
+    if (!window.vikingRelay || startWithWindows === null) return
+    const next = !startWithWindows
+    setStartWithWindows(next)
+    try {
+      const s = await window.vikingRelay.updateSettings({ startWithWindows: next })
+      setStartWithWindows(s.startWithWindows)
+    } catch {
+      setStartWithWindows(!next)
+    }
+  }
 
   useEffect(() => {
     if (!open || mode !== 'client' || !window.vikingRelay?.getDirectDownloadsState) return
@@ -183,6 +202,25 @@ export function GlobalSettingsModal({
             ) : null}
           </div>
         </div>
+
+        {startWithWindows !== null ? (
+          <div className="mt-6" data-testid="startup-section">
+            <h3 className="text-sm font-semibold text-neutral-100">Startup</h3>
+            <label className="mt-2 flex items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={startWithWindows}
+                onChange={() => void toggleStartWithWindows()}
+                className="h-4 w-4"
+                data-testid="start-with-windows"
+              />
+              Start Viking Relay when Windows starts
+            </label>
+            <p className="mt-1 text-xs text-neutral-500">
+              Launches minimized to the tray; the server auto-starts and clients reconnect on their own.
+            </p>
+          </div>
+        ) : null}
 
         {mode === 'client' && dd ? (
           <div className="mt-6 border-t border-neutral-800 pt-4" data-testid="direct-downloads-section">

@@ -17,7 +17,7 @@ import { mkdir, writeFile, unlink } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
-import { app, clipboard, dialog, powerSaveBlocker, shell } from 'electron';
+import { clipboard, dialog, powerSaveBlocker, shell } from 'electron';
 
 import type {
   AppSettings as ServerSettingsView,
@@ -49,6 +49,7 @@ import { collectIpv4Candidates, DEFAULT_RADMIN_ADAPTER_PATTERN } from '../relay/
 import type { RelayManager } from '../relay/lifecycle';
 import { getVolumeSpace } from '../storage';
 import { VikingClient } from '../viking';
+import { applyLoginItem } from '../login-item';
 import { DEFAULT_SETTINGS } from '@shared/settings';
 import {
   buildEngineGraph,
@@ -839,14 +840,6 @@ function settingsView(host: CompositionHost): ServerSettingsView {
     cleanupDeleteFiles: s.cleanupDeleteFiles,
     cleanupDeleteZip: s.cleanupDeleteZip,
   };
-}
-
-function applyLoginItem(open: boolean): void {
-  if (process.platform !== 'win32') return;
-  app.setLoginItemSettings({
-    openAtLogin: open,
-    args: ['--hidden'],
-  });
 }
 
 function toTransferSnapshot(record: JobRecord): TransferSnapshot {

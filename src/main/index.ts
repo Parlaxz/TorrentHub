@@ -28,6 +28,8 @@ function isDev(): boolean {
 }
 
 function createMainWindow(): BrowserWindow {
+  // Login-item launches pass --hidden: start in the tray, no window pop.
+  const startHidden = process.argv.includes('--hidden')
   const win = new BrowserWindow({
     width: 1100,
     height: 760,
@@ -47,7 +49,9 @@ function createMainWindow(): BrowserWindow {
     }
   })
 
-  win.on('ready-to-show', () => win.show())
+  win.on('ready-to-show', () => {
+    if (!startHidden) win.show()
+  })
 
   // Server Mode UX: closing the window hides to tray instead of terminating
   // the relay. Actual exit goes through the tray menu / requestAppExit.
