@@ -19,6 +19,7 @@ export interface SentDirectJob {
   source: string;
   sourceKind: string;
   targetName: string;
+  fromName?: string;
   state: string;
   createdAt: string;
 }
@@ -155,6 +156,18 @@ export function registerClientBridgeIpc(client: ClientRelayService): void {
     client.retryStorageCheck(String(jobId)),
   )
   handle(ClientIpc.listHistory, () => client.listHistory())
+  handle(ClientIpc.clientsList, () => client.listAvailableClients())
+  handle(ClientIpc.sendToFriend, (source: unknown, targetClientId: unknown) =>
+    client.sendToFriend(String(source ?? ''), String(targetClientId ?? '')),
+  )
+  handle(ClientIpc.friendsGet, () => client.getFriends())
+  handle(ClientIpc.friendsAdd, (friend: unknown) => {
+    const f = (friend ?? {}) as { clientId?: unknown; name?: unknown }
+    return client.addFriend({ clientId: String(f.clientId ?? ''), name: String(f.name ?? '') })
+  })
+  handle(ClientIpc.friendsRemove, (clientId: unknown) =>
+    client.removeFriend(String(clientId ?? '')),
+  )
 }
 
 function allWindows(): Electron.BrowserWindow[] {

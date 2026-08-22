@@ -23,10 +23,23 @@ export interface RelayAppDeps {
   serverVersion?: string;
   bodyLimit?: number;
   logger?: FastifyServerOptions["logger"];
-  /** "Friend mode" queue: jobs the server user sent to paired clients. */
+  /** "Friend mode" queue: jobs the server user or a client sent to a paired client. */
   directJobs?: {
+    add(
+      source: string,
+      sourceKind: string,
+      targetClientId: string,
+      targetName: string,
+      from?: { clientId: string; name: string },
+    ): Promise<{ id: string }>;
     queuedFor(clientId: string): Promise<
-      Array<{ id: string; source: string; sourceKind: string; state: string }>
+      Array<{
+        id: string;
+        source: string;
+        sourceKind: string;
+        state: string;
+        fromName?: string;
+      }>
     >;
     setState(id: string, state: "accepted" | "declined"): Promise<unknown>;
   } | null;

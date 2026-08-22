@@ -78,6 +78,13 @@ const clientBridge = {
     ipcRenderer.invoke(ClientIpc.retryStorageCheck, jobId),
 
   listHistory: () => ipcRenderer.invoke(ClientIpc.listHistory),
+  clientsList: () => ipcRenderer.invoke(ClientIpc.clientsList),
+  sendToFriend: (source: string, targetClientId: string) =>
+    ipcRenderer.invoke(ClientIpc.sendToFriend, source, targetClientId),
+  friendsGet: () => ipcRenderer.invoke(ClientIpc.friendsGet),
+  friendsAdd: (friend: { clientId: string; name: string }) =>
+    ipcRenderer.invoke(ClientIpc.friendsAdd, friend),
+  friendsRemove: (clientId: string) => ipcRenderer.invoke(ClientIpc.friendsRemove, clientId),
 
   copyText: async (text: string): Promise<boolean> => {
     try {

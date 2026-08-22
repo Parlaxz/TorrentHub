@@ -370,6 +370,7 @@ export class ServerController implements VikingRelayServerBridge {
       source: string;
       sourceKind: string;
       targetName: string;
+      fromName?: string;
       state: 'queued' | 'accepted' | 'declined';
       createdAt: string;
     }>

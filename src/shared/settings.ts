@@ -47,7 +47,11 @@ export const AppSettingsSchema = z.object({
   /** Client mode: folder where accepted direct downloads are saved. */
   clientDownloadDir: z.string().min(1).nullable().default(null),
   /** Client mode: the friend's own qBittorrent WebUI URL. */
-  clientQbitUrl: z.string().min(1).default('http://127.0.0.1:8080')
+  clientQbitUrl: z.string().min(1).default('http://127.0.0.1:8080'),
+  /** Client mode: saved friends (other paired clients) for direct sends. */
+  friends: z
+    .array(z.object({ clientId: z.string().min(1), name: z.string().min(1) }))
+    .default([])
 })
 export type AppSettings = z.infer<typeof AppSettingsSchema>
 
@@ -78,6 +82,9 @@ export const AppSettingsPatchSchema = z.object({
     .refine((v) => v.startsWith('http://') || v.startsWith('https://'), {
       message: 'must be an http(s) URL'
     })
+    .optional(),
+  friends: z
+    .array(z.object({ clientId: z.string().min(1), name: z.string().min(1) }))
     .optional()
 })
 export type AppSettingsPatch = z.infer<typeof AppSettingsPatchSchema>
@@ -97,5 +104,6 @@ export const DEFAULT_SETTINGS: AppSettings = {
   clientServerPort: 47821,
   directAutoAccept: false,
   clientDownloadDir: null,
-  clientQbitUrl: 'http://127.0.0.1:8080'
+  clientQbitUrl: 'http://127.0.0.1:8080',
+  friends: []
 }

@@ -268,6 +268,56 @@ export class ClientRelayService {
     }))
   }
 
+  // --------------------------------------------------------------- friends
+
+  /** Other paired clients on the same server (potential friends). */
+  async listAvailableClients(): Promise<Array<{ clientId: string; name: string }>> {
+    const response = await this.authed<{ clients: Array<{ clientId: string; name: string }> }>(
+      'GET',
+      ApiRoutes.clients,
+    )
+    return response.clients
+  }
+
+  /** Client-to-client: drop a link into another paired client's queue. */
+  async sendToFriend(
+    source: string,
+    targetClientId: string,
+  ): Promise<BridgeResult<{ id: string }>> {
+    try {
+      const result = await this.authed<{ id: string }>('POST', ApiRoutes.directJobs, {
+        source: source.trim(),
+        targetClientId,
+      })
+      return { ok: true, value: result }
+    } catch (error) {
+      this.log?.warn(
+        { err: describe(error), targetClientId },
+        'send to friend failed',
+      )
+      return { ok: false, error: describe(error) }
+    }
+  }
+
+  getFriends(): Array<{ clientId: string; name: string }> {
+    return this.settings.get().friends
+  }
+
+  addFriend(friend: { clientId: string; name: string }): Array<{ clientId: string; name: string }> {
+    const current = this.settings.get().friends
+    if (!current.some((f) => f.clientId === friend.clientId)) {
+      this.settings.update({ friends: [...current, friend] })
+    }
+    return this.getFriends()
+  }
+
+  removeFriend(clientId: string): Array<{ clientId: string; name: string }> {
+    this.settings.update({
+      friends: this.settings.get().friends.filter((f) => f.clientId !== clientId),
+    })
+    return this.getFriends()
+  }
+
   // ------------------------------------------------------------- internals
 
   private async authed<T>(method: 'GET' | 'POST', path: string, body?: unknown): Promise<T> {

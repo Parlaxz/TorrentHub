@@ -122,7 +122,8 @@ export function SendDirectModal({
                     <li key={j.id} className="flex items-center justify-between gap-3">
                       <span className="min-w-0 flex-1 truncate text-zinc-700 dark:text-zinc-300">{j.source}</span>
                       <span className="shrink-0 text-zinc-500 dark:text-zinc-400">
-                        → {j.targetName} · {STATE_LABEL[j.state]}
+                        {j.fromName && j.fromName !== "Server" ? `from ${j.fromName} · ` : ""}→ {j.targetName} ·{" "}
+                        {STATE_LABEL[j.state]}
                       </span>
                     </li>
                   ))}

@@ -1,4 +1,5 @@
 import type { FastifyInstance, FastifyRequest } from "fastify";
+import { z } from "zod";
 import { jobNotFound } from "../jobService.js";
 import type { RelayAppDeps } from "./app.js";
 import { ServiceError } from "./errors.js";
@@ -138,6 +139,59 @@ export function registerRoutes(app: FastifyInstance, deps: RelayAppDeps): void {
     }));
 
     // ---- direct downloads ("friend mode") ----
+
+    /** Roster of OTHER paired clients, for client-to-client sends. */
+    api.get("/clients", async (req) => {
+      const self = req.client!.clientId;
+      const clients = auth
+        .listClients()
+        .filter((c) => !c.revoked && c.clientId !== self)
+        .map((c) => ({ clientId: c.clientId, name: c.name }));
+      return { clients };
+    });
+
+    /** A paired client sends a link to another paired client. */
+    api.post("/direct-jobs", async (req, reply) => {
+      if (!deps.directJobs) {
+        return reply.code(503).send({ error: "unavailable", message: "direct jobs disabled" });
+      }
+      const parsed = z
+        .strictObject({
+          source: z.string().min(8).max(4096),
+          targetClientId: z.string().min(1).max(64),
+        })
+        .safeParse(req.body);
+      if (!parsed.success) {
+        return reply.code(400).send({ error: "validation_error", issues: formatIssues(parsed.error) });
+      }
+      const from = req.client!;
+      if (parsed.data.targetClientId === from.clientId) {
+        return reply.code(400).send({ error: "validation_error", message: "cannot target yourself" });
+      }
+      const target = auth
+        .listClients()
+        .find((c) => !c.revoked && c.clientId === parsed.data.targetClientId);
+      if (!target) {
+        return reply.code(404).send({ error: "not_found", message: "target client is not paired" });
+      }
+      const kind = parsed.data.source.startsWith("magnet:")
+        ? "magnet"
+        : /^https?:\/\//i.test(parsed.data.source)
+          ? "url"
+          : null;
+      if (!kind) {
+        return reply.code(400).send({ error: "validation_error", message: "source must be a magnet or http(s) link" });
+      }
+      const job = await deps.directJobs.add(
+        parsed.data.source,
+        kind,
+        target.clientId,
+        target.name,
+        { clientId: from.clientId, name: from.name },
+      );
+      return reply.code(201).send({ id: job.id });
+    });
+
     api.get("/direct-jobs", async (req) => {
       if (!deps.directJobs) return { jobs: [] };
       return { jobs: await deps.directJobs.queuedFor(req.client!.clientId) };

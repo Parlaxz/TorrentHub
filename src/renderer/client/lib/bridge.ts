@@ -75,6 +75,17 @@ export interface VikingBridge {
 
   /** Safe clipboard write exposed by preload. Returns false if unavailable. */
   copyText(text: string): Promise<boolean>;
+
+  /** Other paired clients on the server (potential friends). */
+  clientsList(): Promise<Array<{ clientId: string; name: string }>>;
+  /** Client-to-client: send a link to another paired client's queue. */
+  sendToFriend(
+    source: string,
+    targetClientId: string,
+  ): Promise<BridgeResult<{ id: string }>>;
+  friendsGet(): Promise<Array<{ clientId: string; name: string }>>;
+  friendsAdd(friend: { clientId: string; name: string }): Promise<Array<{ clientId: string; name: string }>>;
+  friendsRemove(clientId: string): Promise<Array<{ clientId: string; name: string }>>;
 }
 
 /**

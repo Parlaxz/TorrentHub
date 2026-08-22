@@ -143,9 +143,16 @@ export function buildRelay(
   jobService: EngineJobService,
   auth: AuthController,
   directJobs?: {
+    add(
+      source: string,
+      sourceKind: string,
+      targetClientId: string,
+      targetName: string,
+      from?: { clientId: string; name: string },
+    ): Promise<{ id: string }>;
     queuedFor(clientId: string): Promise<
-      Array<{ id: string; source: string; sourceKind: string; state: string }>
-    >;
+        Array<{ id: string; source: string; sourceKind: string; state: string; fromName?: string }>
+      >;
     setState(id: string, state: 'accepted' | 'declined'): Promise<unknown>;
   } | null,
 ): RelayManager {
@@ -167,3 +174,4 @@ export function buildRelay(
     },
   });
 }
+

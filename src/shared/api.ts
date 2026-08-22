@@ -21,6 +21,7 @@ export const ApiRoutes = {
     `/v1/jobs/${encodeURIComponent(jobId)}/recheck-storage`,
   history: '/v1/history',
   serverStatus: '/v1/server/status',
+  clients: '/v1/clients',
   directJobs: '/v1/direct-jobs',
   directJobAction: (id: string, action: 'accept' | 'decline'): string =>
     `/v1/direct-jobs/${encodeURIComponent(id)}/${action}`

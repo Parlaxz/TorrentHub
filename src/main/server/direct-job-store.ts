@@ -16,6 +16,9 @@ export interface DirectJob {
   sourceKind: 'magnet' | 'url' | 'direct';
   targetClientId: string;
   targetName: string;
+  /** Who sent it: the server user or another paired client. */
+  fromClientId: string;
+  fromName: string;
   state: DirectJobState;
   createdAt: string;
   updatedAt: string;
@@ -49,7 +52,13 @@ export class DirectJobStore {
     await writeFile(this.#filePath, JSON.stringify(file, null, 2), 'utf8');
   }
 
-  async add(source: string, sourceKind: DirectJob['sourceKind'], targetClientId: string, targetName: string): Promise<DirectJob> {
+  async add(
+    source: string,
+    sourceKind: DirectJob['sourceKind'],
+    targetClientId: string,
+    targetName: string,
+    from: { clientId: string; name: string } = { clientId: 'server', name: 'Server' },
+  ): Promise<DirectJob> {
     const jobs = await this.load();
     const now = new Date().toISOString();
     const job: DirectJob = {
@@ -58,6 +67,8 @@ export class DirectJobStore {
       sourceKind,
       targetClientId,
       targetName,
+      fromClientId: from.clientId,
+      fromName: from.name,
       state: 'queued',
       createdAt: now,
       updatedAt: now,

@@ -14,5 +14,10 @@ export const ClientIpc = {
   retryUpload: 'client:retryUpload',
   retryStorageCheck: 'client:retryStorageCheck',
   listHistory: 'client:listHistory',
-  copyText: 'client:copyText'
+  copyText: 'client:copyText',
+  clientsList: 'client:clientsList',
+  sendToFriend: 'client:sendToFriend',
+  friendsGet: 'client:friendsGet',
+  friendsAdd: 'client:friendsAdd',
+  friendsRemove: 'client:friendsRemove'
 } as const

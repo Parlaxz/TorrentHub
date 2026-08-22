@@ -206,6 +206,7 @@ export function App() {
 
       {phase.s === "home" ? (
         <HomeScreen
+          bridge={bridge}
           connection={connStatus}
           busy={submitBusy}
           error={submitError}

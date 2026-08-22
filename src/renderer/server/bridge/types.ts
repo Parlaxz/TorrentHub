@@ -119,6 +119,8 @@ export interface SentDirectJob {
   source: string;
   sourceKind: string;
   targetName: string;
+  /** Server user or another paired client (client-to-client sends). */
+  fromName?: string;
   state: "queued" | "accepted" | "declined";
   createdAt: string;
 }
