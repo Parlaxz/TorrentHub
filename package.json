@@ -1,7 +1,7 @@
 {
   "name": "viking-relay",
   "productName": "Viking Relay",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "Two-PC torrent fetch-and-deliver utility over Radmin VPN.",
   "main": "./out/main/index.js",
   "author": "Viking Relay",

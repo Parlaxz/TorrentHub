@@ -109,7 +109,11 @@ export class ServerController implements VikingRelayServerBridge {
     if (!clean) {
       return { ...(await workingFolderStatus(this.#host)), error: 'path is empty' };
     }
+    const previous = this.#host.settings.get().dataDir;
     this.#host.settings.update({ dataDir: clean });
+    if (clean !== previous) {
+      await this.#rebuildGraphForFolderChange();
+    }
     return workingFolderStatus(this.#host);
   }
 
@@ -384,6 +388,7 @@ export class ServerController implements VikingRelayServerBridge {
   }
 
   async updateSettings(patch: SettingsPatch): Promise<ServerSettingsView> {
+    const previousDataDir = this.#host.settings.get().dataDir;
     const mapped: Record<string, unknown> = {};
     if (patch.workingFolderPath !== undefined) mapped.dataDir = patch.workingFolderPath;
     if (patch.radminInterfaceId !== undefined) mapped.radminInterfaceId = patch.radminInterfaceId;
@@ -400,11 +405,52 @@ export class ServerController implements VikingRelayServerBridge {
     const next = this.#host.settings.get();
     applyLoginItem(next.startWithWindows);
 
+    // A working-folder change invalidates the engine graph: jobsRoot, the
+    // workspace gateway, and packaging paths were resolved against the OLD
+    // folder. Rebuild so preflight checks the volume downloads actually use.
+    if (
+      patch.workingFolderPath !== undefined &&
+      (patch.workingFolderPath ?? null) !== previousDataDir
+    ) {
+      await this.#rebuildGraphForFolderChange();
+    }
+
     // Port/adapter changes require the transport to be rebuilt on next start.
     if (this.#relay && (patch.relayPort !== undefined || patch.radminInterfaceId !== undefined)) {
       this.#host.log.info('relay port/adapter changed; restart the server to apply');
     }
     return settingsView(this.#host);
+  }
+
+  /** Rebuilds the engine graph after a working-folder change (idle only). */
+  async #rebuildGraphForFolderChange(): Promise<void> {
+    if (this.hasActiveTransfer()) {
+      this.#host.log.warn(
+        'working folder change deferred until the active transfer finishes; storage checks still target the old folder',
+      );
+      return;
+    }
+    const wasRunning = this.#relay !== null;
+    if (this.#relay) {
+      try {
+        await this.#relay.stop();
+      } catch (error) {
+        this.#host.log.warn({ err: error }, 'relay stop during folder change failed');
+      } finally {
+        this.#relay = null;
+      }
+    }
+    this.stopPushLoop();
+    this.#graph = null;
+    this.#qbitProbe = null;
+    this.#host.log.info({ dataDir: this.#host.settings.get().dataDir }, 'engine graph rebuilt for new working folder');
+    if (wasRunning) {
+      try {
+        await this.startServer();
+      } catch (error) {
+        this.#host.log.error({ err: error }, 'server restart after folder change failed');
+      }
+    }
   }
 
   async setQbitApiKey(apiKey: string): Promise<{ ok: boolean }> {
