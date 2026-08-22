@@ -452,8 +452,45 @@ export class VikingClient {
   }
 
   // ------------------------------------------------------------------
+  // ------------------------------------------------------------------
   // 4. Verification — POST /api/check-file (documented)
   // ------------------------------------------------------------------
+
+  /**
+   * Resolves a file-page URL (/f/KEY) into the direct download link
+   * (/d/OTHERKEY/filename) by POSTing to the page like its own JS does.
+   *
+   * The endpoint is captcha-gated for anonymous visitors; premium accounts
+   * (user hash configured) are typically exempt. Returns null when the
+   * server refuses — callers must degrade gracefully, never retry-loop.
+   */
+  async resolveDirectLink(pageUrl: string, opts: { signal?: AbortSignal } = {}): Promise<string | null> {
+    let target: URL
+    try {
+      target = new URL(pageUrl)
+    } catch {
+      return null
+    }
+    if (!/\/f\/[A-Za-z0-9]+/.test(target.pathname)) return null
+
+    const body = new URLSearchParams()
+    if (this.userHash) body.set('user', this.userHash)
+    try {
+      const response = await fetch(target.toString(), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: body.toString(),
+        redirect: 'follow',
+        signal: opts.signal ?? AbortSignal.timeout(15_000),
+      })
+      if (!response.ok) return null
+      const raw = (await response.json().catch(() => null)) as { link?: unknown } | null
+      if (!raw || typeof raw.link !== 'string' || !/^https?:\/\//i.test(raw.link)) return null
+      return raw.link
+    } catch {
+      return null
+    }
+  }
 
   async verifyUploadedFile(
     hash: string,

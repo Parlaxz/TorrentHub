@@ -197,6 +197,8 @@ export interface HistoryEntry {
   name: string;
   finalState: Extract<JobState, "complete" | "failed" | "cancelled" | "interrupted">;
   url?: string | null;
+  /** Direct download link resolved from the provider, when available. */
+  directUrl?: string | null;
   finishedAt: string;
   errorKind?: string | null;
   /** Human-readable failure reason; present on failed/interrupted jobs. */

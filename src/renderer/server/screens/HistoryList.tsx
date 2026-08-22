@@ -45,24 +45,23 @@ export function HistoryList({
     );
   }
 
-  const copyUrl = async (entry: HistoryEntry): Promise<void> => {
-    if (!entry.url) return;
+  const copyUrl = async (copyId: string, text: string): Promise<void> => {
     let ok = false;
     try {
-      ok = onCopy ? await onCopy(entry.url) : false;
+      ok = onCopy ? await onCopy(text) : false;
     } catch {
       ok = false;
     }
     if (!ok) {
       try {
-        await navigator.clipboard.writeText(entry.url);
+        await navigator.clipboard.writeText(text);
         ok = true;
       } catch {
         ok = false;
       }
     }
     if (ok) {
-      setCopiedId(entry.id);
+      setCopiedId(copyId);
       window.setTimeout(() => setCopiedId(null), 2000);
     }
   };
@@ -95,10 +94,21 @@ export function HistoryList({
                   <button
                     type="button"
                     className="rounded border border-zinc-300 px-2 py-0.5 hover:bg-zinc-50 dark:border-zinc-700 dark:hover:bg-zinc-800"
-                    onClick={() => void copyUrl(entry)}
+                    onClick={() => void copyUrl(entry.id, entry.url!)}
                     data-testid={`copy-link-${entry.id}`}
                   >
                     {copiedId === entry.id ? "Copied ✓" : "Copy link"}
+                  </button>
+                ) : null}
+
+                {entry.finalState === "complete" && entry.directUrl ? (
+                  <button
+                    type="button"
+                    className="rounded border border-emerald-400 px-2 py-0.5 text-emerald-700 hover:bg-emerald-50 dark:border-emerald-800 dark:text-emerald-400 dark:hover:bg-emerald-950/40"
+                    onClick={() => void copyUrl(entry.id + "-direct", entry.directUrl!)}
+                    data-testid={`copy-direct-${entry.id}`}
+                  >
+                    {copiedId === entry.id + "-direct" ? "Copied ✓" : "Copy direct link"}
                   </button>
                 ) : null}
 

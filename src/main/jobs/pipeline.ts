@@ -627,6 +627,15 @@ export class TransferPipeline {
       cleanupWarning: null,
       verified,
     };
+    // Best-effort direct-link resolution (/f/ page → /d/ file). Never fails
+    // the job; when the provider refuses, only the page link is offered.
+    if (typeof this.#deps.viking.resolveDirectLink === "function") {
+      try {
+        record.result.directUrl = await this.#deps.viking.resolveDirectLink(record.result.url);
+      } catch {
+        record.result.directUrl = null;
+      }
+    }
     record.stages.finalize = "complete";
     await this.#save();
 

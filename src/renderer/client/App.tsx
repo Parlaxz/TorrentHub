@@ -248,6 +248,7 @@ export function App() {
           filename={phase.job.metadata?.name ?? "Download"}
           sizeBytes={phase.job.result?.sizeBytes ?? phase.job.metadata?.totalSizeBytes ?? null}
           url={phase.job.result?.url ?? ""}
+          directUrl={phase.job.result?.directUrl ?? null}
           onNewTorrent={() => {
             setLatestJob(null);
             setPhase({ s: "home" });

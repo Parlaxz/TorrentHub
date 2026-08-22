@@ -159,6 +159,11 @@ export interface VikingGateway {
   upload(request: UploadRequest): Promise<VikingUploadResult>;
   /** Optional capability: verify a previously returned result. */
   verify?(result: VikingUploadResult): Promise<boolean>;
+  /**
+   * Optional capability: resolve a /f/ page URL into the direct /d/ link.
+   * Returns null when the provider refuses (e.g. captcha required).
+   */
+  resolveDirectLink?(pageUrl: string): Promise<string | null>;
 }
 
 export interface PreflightRequest {

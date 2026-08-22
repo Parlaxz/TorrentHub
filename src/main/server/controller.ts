@@ -859,6 +859,7 @@ function toHistoryEntry(record: JobRecord): HistoryEntry {
     name: record.metadata?.name ?? record.source.value,
     finalState: record.state as HistoryEntry["finalState"],
     url: record.result?.url ?? null,
+    directUrl: record.result?.directUrl ?? null,
     finishedAt: record.updatedAt,
     errorKind: record.error?.kind ?? null,
     errorMessage: record.error?.message ?? null,

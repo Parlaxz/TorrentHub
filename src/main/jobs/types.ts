@@ -147,6 +147,8 @@ export interface JobError {
 export interface JobResult {
   /** Viking URL of the delivered artifact. Persisted BEFORE destructive cleanup. */
   url: string;
+  /** Direct download link resolved from the provider, when available. */
+  directUrl?: string | null;
   sha256?: string | null;
   sizeBytes?: number | null;
   /** Present when upload succeeded and final URL was durably saved but local cleanup failed. */

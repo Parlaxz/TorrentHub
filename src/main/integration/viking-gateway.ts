@@ -75,4 +75,9 @@ export class VikingGatewayAdapter implements VikingGateway {
     const check = await this.client.verifyUploadedFile(result.sha256);
     return check.exists;
   }
+
+  /** Best-effort /f/ → /d/ resolution. Null when the provider refuses. */
+  async resolveDirectLink(pageUrl: string): Promise<string | null> {
+    return this.client.resolveDirectLink(pageUrl);
+  }
 }

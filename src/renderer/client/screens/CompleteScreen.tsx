@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useState } from "react";
 import { Button, Panel } from "../components/ui";
 import type { VikingBridge } from "../lib/bridge";
 import { formatBytes } from "../lib/format";
@@ -9,23 +9,25 @@ export function CompleteScreen({
   filename,
   sizeBytes,
   url,
+  directUrl,
   onNewTorrent,
 }: {
   bridge: VikingBridge | null;
   filename: string;
   sizeBytes: number | null;
   url: string;
+  /** Direct download link resolved by the server, when available. */
+  directUrl?: string | null;
   onNewTorrent: () => void;
 }) {
-  const [copied, setCopied] = useState(false);
-  const inputRef = useRef<HTMLInputElement>(null);
+  const [copied, setCopied] = useState<string | null>(null);
 
-  const copy = async (): Promise<void> => {
+  const copy = async (text: string, tag: string): Promise<void> => {
     if (bridge) {
       try {
-        if (await bridge.copyText(url)) {
-          setCopied(true);
-          window.setTimeout(() => setCopied(false), 2000);
+        if (await bridge.copyText(text)) {
+          setCopied(tag);
+          window.setTimeout(() => setCopied(null), 2000);
           return;
         }
       } catch {
@@ -34,16 +36,15 @@ export function CompleteScreen({
     }
     // Renderer-side fallback (works when the page has clipboard permission).
     try {
-      await navigator.clipboard.writeText(url);
-      setCopied(true);
-      window.setTimeout(() => setCopied(false), 2000);
+      await navigator.clipboard.writeText(text);
+      setCopied(tag);
+      window.setTimeout(() => setCopied(null), 2000);
       return;
     } catch {
-      /* fall through to select-text */
+      /* fall through */
     }
-    // Last resort: select the text so the user can copy manually.
-    inputRef.current?.focus();
-    inputRef.current?.select();
+    // Last resort: let the user select the readonly input manually.
+    window.getSelection()?.selectAllChildren(document.body);
   };
 
   return (
@@ -68,7 +69,6 @@ export function CompleteScreen({
             Viking URL
           </p>
           <input
-            ref={inputRef}
             readOnly
             value={url}
             aria-label="Viking URL"
@@ -77,8 +77,15 @@ export function CompleteScreen({
           />
         </div>
 
-        <div className="mt-5 flex justify-center gap-2">
-          <Button onClick={() => void copy()}>{copied ? "Copied ✓" : "Copy Link"}</Button>
+        <div className="mt-5 flex flex-wrap justify-center gap-2">
+          <Button onClick={() => void copy(url, "page")}>
+            {copied === "page" ? "Copied ✓" : "Copy Link"}
+          </Button>
+          {directUrl ? (
+            <Button variant="secondary" onClick={() => void copy(directUrl, "direct")}>
+              {copied === "direct" ? "Copied ✓" : "Copy Direct Link"}
+            </Button>
+          ) : null}
           <Button variant="secondary" onClick={onNewTorrent}>
             New Torrent
           </Button>

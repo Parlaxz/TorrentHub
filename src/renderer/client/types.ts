@@ -104,6 +104,8 @@ export interface JobError {
 
 export interface JobResult {
   url: string;
+  /** Direct download link resolved by the server, when available. */
+  directUrl?: string | null;
   sha256?: string | null;
   sizeBytes?: number | null;
   cleanupWarning?: string | null;
