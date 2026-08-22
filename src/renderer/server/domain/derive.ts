@@ -211,7 +211,9 @@ export const RADMIN_OFFLINE_MESSAGE =
   "Server is unavailable to Client until Radmin reconnects.";
 
 export function isRadminOffline(health: HealthSnapshot): boolean {
-  return health.radmin.state !== "ok";
+  // Only a hard failure means "clients cannot reach us". A stopped or
+  // not-yet-started relay has its own row detail; it is not a Radmin outage.
+  return health.radmin.state === "error";
 }
 
 /* --------------------------------- pairing ---------------------------------- */

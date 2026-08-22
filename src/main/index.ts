@@ -11,6 +11,7 @@ import { ClientRelayService } from './client-relay/service'
 import { registerClientBridgeIpc } from './server/ipc-server'
 import { registerServerBridgeIpc } from './server/ipc-server'
 import { ServerController } from './server/controller'
+import { SECRET_QBIT_API_KEY } from './server/composition'
 
 // ---------------------------------------------------------------------------
 // Window + security
@@ -219,6 +220,19 @@ if (!gotLock) {
       }
     })
     registerServerBridgeIpc(serverController)
+
+    // Auto-start the relay when setup is already complete so paired clients
+    // reconnect on their own after an app restart (incl. tray/hidden starts).
+    if (settings.get().dataDir && secrets.get(SECRET_QBIT_API_KEY)) {
+      void serverController
+        .startServer()
+        .then((health) => {
+          log.info({ online: health.online, address: health.address }, 'server auto-started')
+        })
+        .catch((err) => {
+          log.warn({ err }, 'server auto-start failed; start it manually from the dashboard')
+        })
+    }
 
     applySessionSecurity()
 

@@ -126,9 +126,11 @@ describe("readinessRows + offline", () => {
     expect(rows[3].detail).toContain("free");
   });
 
-  it("flags radmin non-ok as offline with the fixed message", () => {
+  it("flags only hard radmin failures as offline with the fixed message", () => {
     expect(isRadminOffline(health("error"))).toBe(true);
     expect(isRadminOffline(health("ok"))).toBe(false);
+    expect(isRadminOffline(health("warn"))).toBe(false);
+    expect(isRadminOffline(health("unknown"))).toBe(false);
     expect(RADMIN_OFFLINE_MESSAGE).toBe(
       "Server is unavailable to Client until Radmin reconnects.",
     );
