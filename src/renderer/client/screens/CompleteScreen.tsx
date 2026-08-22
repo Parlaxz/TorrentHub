@@ -47,6 +47,11 @@ export function CompleteScreen({
     window.getSelection()?.selectAllChildren(document.body);
   };
 
+  const open = async (text: string): Promise<void> => {
+    if (!window.vikingRelay?.openExternal) return;
+    await window.vikingRelay.openExternal(text).catch(() => undefined);
+  };
+
   return (
     <div className="mx-auto flex min-h-full w-full max-w-md flex-col justify-center px-6 py-10">
       <Panel className="text-center">
@@ -77,16 +82,32 @@ export function CompleteScreen({
           />
         </div>
 
-        <div className="mt-5 flex flex-wrap justify-center gap-2">
+        <div className="mt-5 grid grid-cols-2 gap-2">
           <Button onClick={() => void copy(url, "page")}>
             {copied === "page" ? "Copied ✓" : "Copy Link"}
           </Button>
+          <Button
+            variant="secondary"
+            onClick={() => void open(url)}
+            data-testid="open-page-link"
+          >
+            Open Link
+          </Button>
           {directUrl ? (
-            <Button variant="secondary" onClick={() => void copy(directUrl, "direct")}>
-              {copied === "direct" ? "Copied ✓" : "Copy Direct Link"}
-            </Button>
+            <>
+              <Button onClick={() => void copy(directUrl, "direct")}>
+                {copied === "direct" ? "Copied ✓" : "Copy Direct Link"}
+              </Button>
+              <Button
+                variant="secondary"
+                onClick={() => void open(directUrl)}
+                data-testid="open-direct-link"
+              >
+                Open Direct Link
+              </Button>
+            </>
           ) : null}
-          <Button variant="secondary" onClick={onNewTorrent}>
+          <Button variant="secondary" onClick={onNewTorrent} className="col-span-2">
             New Torrent
           </Button>
         </div>

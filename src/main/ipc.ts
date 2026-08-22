@@ -89,6 +89,15 @@ export function registerIpcHandlers(ctx: IpcContext): void {
     },
     [IpcChannels.ddRefresh]: async () => {
       await ctx.directDownloads.pollOnce()
+    },
+    [IpcChannels.openExternal]: async (rawUrl): Promise<boolean> => {
+      const url = String(rawUrl ?? '').trim()
+      if (!/^https?:\/\//i.test(url)) {
+        ctx.log.warn({ url }, 'blocked openExternal attempt (non-http)')
+        return false
+      }
+      await shell.openExternal(url)
+      return true
     }
   }
 
@@ -144,4 +153,8 @@ export function registerIpcHandlers(ctx: IpcContext): void {
     return handlers[IpcChannels.ddDecline](id)
   })
   ipcMain.handle(IpcChannels.ddRefresh, () => handlers[IpcChannels.ddRefresh]())
+  ipcMain.handle(IpcChannels.openExternal, (_e, url: unknown) => {
+    if (typeof url !== 'string' || !/^https?:\/\//i.test(url)) throw badRequest('invalid url')
+    return handlers[IpcChannels.openExternal](url)
+  })
 }

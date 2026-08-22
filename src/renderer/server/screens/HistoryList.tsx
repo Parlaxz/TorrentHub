@@ -23,11 +23,13 @@ export function HistoryList({
   entries,
   archived = false,
   onCopy,
+  onOpen,
   onArchive,
 }: {
   entries: HistoryEntry[];
   archived?: boolean;
   onCopy?: (text: string) => Promise<boolean>;
+  onOpen?: (url: string) => Promise<void>;
   onArchive?: (jobId: string, archived: boolean) => Promise<void>;
 }) {
   const [copiedId, setCopiedId] = useState<string | null>(null);
@@ -91,25 +93,45 @@ export function HistoryList({
 
               <div className="mt-1.5 flex flex-wrap items-center gap-2 text-xs">
                 {entry.finalState === "complete" && entry.url ? (
-                  <button
-                    type="button"
-                    className="rounded border border-zinc-300 px-2 py-0.5 hover:bg-zinc-50 dark:border-zinc-700 dark:hover:bg-zinc-800"
-                    onClick={() => void copyUrl(entry.id, entry.url!)}
-                    data-testid={`copy-link-${entry.id}`}
-                  >
-                    {copiedId === entry.id ? "Copied ✓" : "Copy link"}
-                  </button>
+                  <>
+                    <button
+                      type="button"
+                      className="rounded border border-zinc-300 px-2 py-0.5 hover:bg-zinc-50 dark:border-zinc-700 dark:hover:bg-zinc-800"
+                      onClick={() => void copyUrl(entry.id, entry.url!)}
+                      data-testid={`copy-link-${entry.id}`}
+                    >
+                      {copiedId === entry.id ? "Copied ✓" : "Copy link"}
+                    </button>
+                    <button
+                      type="button"
+                      className="rounded border border-zinc-300 px-2 py-0.5 hover:bg-zinc-50 dark:border-zinc-700 dark:hover:bg-zinc-800"
+                      onClick={() => void onOpen?.(entry.url!)}
+                      data-testid={`open-link-${entry.id}`}
+                    >
+                      Open
+                    </button>
+                  </>
                 ) : null}
 
                 {entry.finalState === "complete" && entry.directUrl ? (
-                  <button
-                    type="button"
-                    className="rounded border border-emerald-400 px-2 py-0.5 text-emerald-700 hover:bg-emerald-50 dark:border-emerald-800 dark:text-emerald-400 dark:hover:bg-emerald-950/40"
-                    onClick={() => void copyUrl(entry.id + "-direct", entry.directUrl!)}
-                    data-testid={`copy-direct-${entry.id}`}
-                  >
-                    {copiedId === entry.id + "-direct" ? "Copied ✓" : "Copy direct link"}
-                  </button>
+                  <>
+                    <button
+                      type="button"
+                      className="rounded border border-emerald-400 px-2 py-0.5 text-emerald-700 hover:bg-emerald-50 dark:border-emerald-800 dark:text-emerald-400 dark:hover:bg-emerald-950/40"
+                      onClick={() => void copyUrl(entry.id + "-direct", entry.directUrl!)}
+                      data-testid={`copy-direct-${entry.id}`}
+                    >
+                      {copiedId === entry.id + "-direct" ? "Copied ✓" : "Copy direct link"}
+                    </button>
+                    <button
+                      type="button"
+                      className="rounded border border-emerald-400 px-2 py-0.5 text-emerald-700 hover:bg-emerald-50 dark:border-emerald-800 dark:text-emerald-400 dark:hover:bg-emerald-950/40"
+                      onClick={() => void onOpen?.(entry.directUrl!)}
+                      data-testid={`open-direct-${entry.id}`}
+                    >
+                      Open direct
+                    </button>
+                  </>
                 ) : null}
 
                 {hasCause ? (

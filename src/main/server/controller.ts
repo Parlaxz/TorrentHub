@@ -415,6 +415,13 @@ export class ServerController implements VikingRelayServerBridge {
     return true;
   }
 
+  async openExternal(url: string): Promise<boolean> {
+    const clean = String(url ?? '').trim();
+    if (!/^https?:\/\//i.test(clean)) return false;
+    await shell.openExternal(clean);
+    return true;
+  }
+
   async dismissInterruptedJob(jobId: string): Promise<void> {
     const repository = this.ensureGraph().repository;
     const record = await repository.get(jobId);

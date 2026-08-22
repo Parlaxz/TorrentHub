@@ -32,6 +32,7 @@ import { StoragePolicyGateway } from '../integration/storage-gateway';
 import { HttpDirectDownloadGateway } from '../integration/direct-gateway';
 import { VikingGatewayAdapter } from '../integration/viking-gateway';
 import { SafeStorageTokenPersistence } from './auth-persistence';
+import { resolveDirectLinkViaWindow } from '../viking/direct-link-window';
 
 export const SECRET_QBIT_API_KEY = 'qbittorrent.apiKey';
 export const SECRET_VIKING_USER_HASH = 'viking.userHash';
@@ -104,12 +105,14 @@ export function buildEngineGraph(
   mkdirSync(resolveJobsRoot(host), { recursive: true });
 
   const torrent = new QbitTorrentGateway(resolveQbit);
-  const viking = new VikingGatewayAdapter(resolveViking);
+  const direct = new HttpDirectDownloadGateway();
+  const viking = new VikingGatewayAdapter(resolveViking, (pageUrl) =>
+    resolveDirectLinkViaWindow(pageUrl, host.log),
+  );
   const packaging = new PackagingGatewayAdapter();
   const storage = new StoragePolicyGateway({
     warn: (obj, msg) => host.log.warn(obj, msg),
   });
-  const direct = new HttpDirectDownloadGateway();
   const workspace = new FsWorkspaceGateway(resolveJobsRoot(host));
   const repository = new JsonJobRepository({
     filePath: join(host.userDataDir, 'data', 'job-history.json'),

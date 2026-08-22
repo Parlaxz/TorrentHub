@@ -23,7 +23,8 @@ export const IpcChannels = {
   ddSetSettings: 'dd:setSettings',
   ddAccept: 'dd:accept',
   ddDecline: 'dd:decline',
-  ddRefresh: 'dd:refresh'
+  ddRefresh: 'dd:refresh',
+  openExternal: 'app:openExternal'
 } as const
 
 // ---------------------------------------------------------------------------
@@ -94,6 +95,8 @@ export interface VikingRelayBridge {
   installUpdate(): Promise<UpdateState>
   /** Opens the logs folder in the OS file explorer. */
   openLogsFolder(): Promise<boolean>
+  /** Opens an http(s) URL in the system browser. Non-http(s) is refused. */
+  openExternal(url: string): Promise<boolean>
   /** Main-process log mirror (warn/error) so failures reach the DevTools console. */
   onLog(cb: (entry: { level: 'warn' | 'error' | 'info'; msg: string }) => void): () => void
   /** Client mode "friend" receiver: settings + local queue. */
@@ -146,6 +149,7 @@ export interface IpcHandlers {
   [IpcChannels.ddAccept]: (id: string) => Promise<void>
   [IpcChannels.ddDecline]: (id: string) => Promise<void>
   [IpcChannels.ddRefresh]: () => Promise<void>
+  [IpcChannels.openExternal]: (url: string) => Promise<boolean>
 }
 
 export { AppModeSchema, AppSettingsPatchSchema, SecretKeySchema, SecretValueSchema }

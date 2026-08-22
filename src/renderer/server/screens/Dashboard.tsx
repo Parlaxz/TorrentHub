@@ -147,12 +147,14 @@ export function Dashboard({ bridge }: { bridge: VikingRelayServerBridge }) {
               entries={archivedEntries}
               archived
               onCopy={bridge.copyText ? (t) => bridge.copyText!(t) : undefined}
+              onOpen={bridge.openExternal ? (u) => bridge.openExternal!(u).then(() => undefined) : undefined}
               onArchive={archiveJob}
             />
           ) : (
             <HistoryList
               entries={history}
               onCopy={bridge.copyText ? (t) => bridge.copyText!(t) : undefined}
+              onOpen={bridge.openExternal ? (u) => bridge.openExternal!(u).then(() => undefined) : undefined}
               onArchive={archiveJob}
             />
           )}

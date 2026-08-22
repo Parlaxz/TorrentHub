@@ -23,7 +23,11 @@ export class VikingGatewayAdapter implements VikingGateway {
    * A provider so Electron main can apply Viking credential changes without
    * rebuilding the job engine (only swapped while no transfer is active).
    */
-  constructor(private readonly resolveClient: () => VikingClient) {}
+  constructor(
+    private readonly resolveClient: () => VikingClient,
+    /** Electron-window fallback used when the headless resolver is refused. */
+    private readonly windowFallback?: (pageUrl: string) => Promise<string | null>,
+  ) {}
 
   private get client(): VikingClient {
     return this.resolveClient();
@@ -78,6 +82,18 @@ export class VikingGatewayAdapter implements VikingGateway {
 
   /** Best-effort /f/ → /d/ resolution. Null when the provider refuses. */
   async resolveDirectLink(pageUrl: string): Promise<string | null> {
-    return this.client.resolveDirectLink(pageUrl);
+    // 1) Headless: premium user hash usually bypasses the challenge.
+    const headless = await this.client.resolveDirectLink(pageUrl);
+    if (headless) return headless;
+    // 2) Visible app-browser window: the site's own JS + Turnstile run with
+    //    real Chromium; auto-closes once the link is generated.
+    if (this.windowFallback) {
+      try {
+        return await this.windowFallback(pageUrl);
+      } catch {
+        return null;
+      }
+    }
+    return null;
   }
 }

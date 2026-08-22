@@ -24,6 +24,7 @@ const bridge: VikingRelayBridge = {
   checkForUpdates: () => ipcRenderer.invoke(IpcChannels.updatesCheck),
   installUpdate: () => ipcRenderer.invoke(IpcChannels.updatesInstall),
   openLogsFolder: () => ipcRenderer.invoke(IpcChannels.openLogsFolder),
+  openExternal: (url: string) => ipcRenderer.invoke(IpcChannels.openExternal, url),
   getDirectDownloadsState: () => ipcRenderer.invoke(IpcChannels.ddGetState),
   setDirectDownloadSettings: (patch: Parameters<VikingRelayBridge['setDirectDownloadSettings']>[0]) =>
     ipcRenderer.invoke(IpcChannels.ddSetSettings, patch),
@@ -137,6 +138,7 @@ const serverBridge = {
   setJobArchived: (jobId: string, archived: boolean) =>
     ipcRenderer.invoke(ServerIpc.setJobArchived, jobId, archived),
   copyText: (text: string) => ipcRenderer.invoke(ServerIpc.copyText, text),
+  openExternal: (url: string) => ipcRenderer.invoke(ServerIpc.openExternal, url),
   dismissInterruptedJob: (jobId: string) =>
     ipcRenderer.invoke(ServerIpc.dismissInterruptedJob, jobId),
   cleanJobData: (jobId: string) => ipcRenderer.invoke(ServerIpc.cleanJobData, jobId),

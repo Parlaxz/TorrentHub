@@ -22,6 +22,7 @@ export const ServerIpc = {
   getArchivedHistory: 'server:getArchivedHistory',
   setJobArchived: 'server:setJobArchived',
   copyText: 'server:copyText',
+  openExternal: 'server:openExternal',
   dismissInterruptedJob: 'server:dismissInterruptedJob',
   cleanJobData: 'server:cleanJobData',
   openQBittorrentWebUi: 'server:openQBittorrentWebUi',

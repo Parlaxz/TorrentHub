@@ -94,6 +94,7 @@ export function registerServerBridgeIpc(controller: ServerController): void {
     clipboard.writeText(String(text ?? ''))
     return true
   })
+  handle(ServerIpc.openExternal, (url: unknown) => controller.openExternal(String(url ?? '')))
   handle(ServerIpc.dismissInterruptedJob, (jobId: unknown) =>
     controller.dismissInterruptedJob(String(jobId)),
   )

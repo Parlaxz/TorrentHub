@@ -305,6 +305,8 @@ export interface VikingRelayServerBridge {
   setJobArchived?(jobId: string, archived: boolean): Promise<void>;
   /** Copies text to the clipboard from the main process. */
   copyText?(text: string): Promise<boolean>;
+  /** Opens an http(s) URL in the system browser. */
+  openExternal?(url: string): Promise<boolean>;
   dismissInterruptedJob?(jobId: string): Promise<void>;
   cleanJobData?(jobId: string): Promise<void>;
   openQBittorrentWebUi?(): Promise<void>;
