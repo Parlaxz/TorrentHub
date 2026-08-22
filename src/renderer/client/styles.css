@@ -1,0 +1,52 @@
+/*
+ * Viking Relay — Client Mode renderer styles.
+ *
+ * Tailwind itself is imported once by the shell (`src/renderer/src/global.css`,
+ * Tailwind v4 `@import 'tailwindcss'`). This file only adds client-specific
+ * base rules. Dark/light follows the OS via Tailwind v4's default
+ * `prefers-color-scheme` strategy for `dark:` utilities.
+ */
+
+:root {
+  color-scheme: light dark;
+}
+
+body {
+  font-family:
+    "Segoe UI Variable Text",
+    "Segoe UI",
+    system-ui,
+    -apple-system,
+    "Helvetica Neue",
+    Arial,
+    sans-serif;
+  -webkit-font-smoothing: antialiased;
+  user-select: none;
+}
+
+/* Allow text selection where it matters (URLs, errors, inputs). */
+input,
+[role="alert"],
+[role="status"] {
+  user-select: text;
+}
+
+/* Indeterminate progress sweep for the metadata screen. */
+@keyframes viking-indeterminate {
+  0% {
+    transform: translateX(-120%);
+  }
+  100% {
+    transform: translateX(420%);
+  }
+}
+
+.indeterminate-bar {
+  animation: viking-indeterminate 1.4s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .indeterminate-bar {
+    animation-duration: 3s;
+  }
+}

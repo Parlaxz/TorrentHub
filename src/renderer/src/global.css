@@ -1,0 +1,25 @@
+@import 'tailwindcss';
+
+/* Class-based dark variant (Tailwind v4 mechanism). The main process mirrors
+   the OS preference onto <html class="dark">, so `dark:` utilities follow the
+   system theme while remaining overridable per-window. */
+@custom-variant dark (&:where(.dark, .dark *));
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  font-family:
+    "Segoe UI Variable Text",
+    "Segoe UI",
+    system-ui,
+    -apple-system,
+    "Helvetica Neue",
+    Arial,
+    sans-serif;
+  font-size: 15px;
+  -webkit-font-smoothing: antialiased;
+}

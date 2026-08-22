@@ -1,0 +1,29 @@
+appId: com.vikingrelay.app
+productName: Viking Relay
+copyright: Copyright © 2026 Viking Relay
+
+directories:
+  output: dist
+  buildResources: build
+
+files:
+  - out/**
+
+asar: true
+
+extraResources:
+  - from: build/icon.png
+    to: icon.png
+
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  artifactName: ${productName}-Setup-${version}.${ext}
+  shortcutName: Viking Relay

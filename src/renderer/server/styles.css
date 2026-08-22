@@ -1,0 +1,22 @@
+/*
+ * Viking Relay — Server Mode styles.
+ *
+ * Tailwind itself is imported ONCE by the shell (`src/renderer/src/global.css`,
+ * Tailwind v4 `@import 'tailwindcss'`). This file only adds server-specific
+ * base rules in plain CSS — no parallel Tailwind pipeline.
+ */
+
+:root {
+  color-scheme: light dark;
+}
+
+body {
+  user-select: none;
+}
+
+input,
+textarea,
+[role="alert"],
+[role="status"] {
+  user-select: text;
+}
