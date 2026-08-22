@@ -34,6 +34,7 @@ export interface StoragePreflight {
   tempZipBytes: number | null
   safetyReserveBytes: number | null
   peakRequiredBytes: number | null
+  /** Null when the volume could not be stat'd — unknown, not insufficient. */
   serverFreeBytes: number | null
   enough: boolean
   missingBytes: number | null

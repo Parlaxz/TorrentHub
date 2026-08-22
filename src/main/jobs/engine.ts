@@ -41,6 +41,7 @@ export class JobEngine {
   readonly #deps: JobEngineDeps;
   readonly #config: JobEngineConfig;
   readonly #epoch: string;
+  readonly #log: JobEngineConfig["logger"];
   /** Serializes transfer ownership (one active transfer at a time). */
   #transferChain: Promise<void> = Promise.resolve();
   #activeTransferJobId: string | null = null;
@@ -51,6 +52,7 @@ export class JobEngine {
   constructor(deps: JobEngineDeps, config: JobEngineConfig) {
     this.#deps = deps;
     this.#config = resolveConfig(config);
+    this.#log = this.#config.logger;
     this.#epoch = newSessionEpoch();
   }
 
@@ -217,6 +219,10 @@ export class JobEngine {
     const deficitForView =
       freeForView !== null ? Math.max(0, requiredForView - freeForView) : null;
     const blocked = !verdict.ok;
+    // Unknown free space is NOT insufficiency: the policy is "proceed without
+    // blocking" when the volume cannot be stat'd. Treating null as failure
+    // produced "Blocked — need 0 GB more" on healthy disks.
+    const unknownFree = freeForView === null && !blocked;
     record.preflight = {
       selectedFiles: indexes.length,
       selectedBytes,
@@ -224,10 +230,20 @@ export class JobEngine {
       safetyReserveBytes: verdict.safetyReserveBytes ?? this.#config.safetyReserveBytes,
       peakRequiredBytes: requiredForView,
       serverFreeBytes: freeForView,
-      enough: !blocked && deficitForView === 0,
-      missingBytes: blocked ? (verdict.deficitBytes ?? deficitForView) : 0,
+      enough: !blocked && (unknownFree || deficitForView === 0),
+      missingBytes: blocked ? (verdict.deficitBytes ?? deficitForView ?? 0) : 0,
       blocked,
     };
+    this.#log?.info(
+      {
+        jobId: record.id,
+        status: blocked ? 'blocked' : unknownFree ? 'unknown-free' : 'ok',
+        freeBytes: freeForView,
+        requiredPeakBytes: requiredForView,
+        zipRequired,
+      },
+      'storage preflight',
+    );
     if (!verdict.ok) {
       record.stages.preflight = "failed";
       record.error = {

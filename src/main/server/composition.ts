@@ -10,6 +10,7 @@
  * nonterminal previous-session jobs are marked interrupted — no qBit
  * reconstruction, no ZIP resume, no Viking multipart resume.
  */
+import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 
 import type { Logger } from 'pino';
@@ -97,10 +98,16 @@ export function buildEngineGraph(
   const tokens = new TokenStore(persistence, secret);
   const auth = new AuthController({ tokens });
 
+  // The jobs root must exist before the first preflight: statfs on a missing
+  // path fails, which used to surface client-side as "Blocked — need 0 GB".
+  mkdirSync(resolveJobsRoot(host), { recursive: true });
+
   const torrent = new QbitTorrentGateway(resolveQbit);
   const viking = new VikingGatewayAdapter(resolveViking);
   const packaging = new PackagingGatewayAdapter();
-  const storage = new StoragePolicyGateway();
+  const storage = new StoragePolicyGateway({
+    warn: (obj, msg) => host.log.warn(obj, msg),
+  });
   const workspace = new FsWorkspaceGateway(resolveJobsRoot(host));
   const repository = new JsonJobRepository({
     filePath: join(host.userDataDir, 'data', 'job-history.json'),
@@ -111,6 +118,10 @@ export function buildEngineGraph(
     resolveConfig({
       jobsRoot: resolveJobsRoot(host),
       historyFilePath: join(host.userDataDir, 'data', 'job-history.json'),
+      logger: {
+        info: (obj, msg) => host.log.info(obj, msg),
+        warn: (obj, msg) => host.log.warn(obj, msg),
+      },
     }),
   );
   return { engine, jobService: new EngineJobService(engine), auth, repository };

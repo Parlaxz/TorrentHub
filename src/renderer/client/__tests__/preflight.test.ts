@@ -54,6 +54,11 @@ describe("startBlocked — Start is gated exclusively by the server verdict", ()
   it("allows a healthy preflight", () => {
     expect(startBlocked(pf())).toBe(false);
   });
+
+  it("does NOT block when server free space is unknown (null)", () => {
+    // Regression: unknown free space used to surface as "Blocked — need 0 GB".
+    expect(startBlocked(pf({ enough: false, serverFreeBytes: null, missingBytes: 0 }))).toBe(false);
+  });
 });
 
 describe("storageVerdict", () => {
@@ -61,6 +66,12 @@ describe("storageVerdict", () => {
     const v = storageVerdict(pf());
     expect(v.ok).toBe(true);
     expect(v.text).toBe("Enough storage");
+  });
+
+  it("stays neutral when server free space is unknown", () => {
+    const v = storageVerdict(pf({ enough: true, serverFreeBytes: null }));
+    expect(v.ok).toBe(true);
+    expect(v.text).toContain("couldn't be verified");
   });
 
   it("reports how much more is needed", () => {

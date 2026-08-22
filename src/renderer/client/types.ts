@@ -162,7 +162,8 @@ export interface StoragePreflight {
   tempZipBytes: number | null;
   safetyReserveBytes: number;
   peakRequiredBytes: number;
-  serverFreeBytes: number;
+  /** Null when the server could not stat the volume (unknown, not blocked). */
+  serverFreeBytes: number | null;
   enough: boolean;
   missingBytes?: number | null;
   /** Server-side hard block; Start must be disabled when true. */

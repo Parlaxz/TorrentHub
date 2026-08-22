@@ -40,6 +40,8 @@ export function zipNotice(
 export function startBlocked(preflight: StoragePreflight | null): boolean {
   if (!preflight) return true;
   if (preflight.blocked === true) return true;
+  // Unknown server free space is NOT insufficiency — proceed.
+  if (preflight.serverFreeBytes == null) return false;
   return !preflight.enough;
 }
 
@@ -48,9 +50,14 @@ export function storageVerdict(
   preflight: StoragePreflight,
 ): { ok: boolean; text: string } {
   if (preflight.enough && preflight.blocked !== true) {
+    if (preflight.serverFreeBytes == null) {
+      return { ok: true, text: "Server storage couldn't be verified — continuing." };
+    }
     return { ok: true, text: "Enough storage" };
   }
-  const missing = preflight.missingBytes ?? Math.max(0, preflight.peakRequiredBytes - preflight.serverFreeBytes);
+  const missing =
+    preflight.missingBytes ??
+    Math.max(0, preflight.peakRequiredBytes - (preflight.serverFreeBytes ?? 0));
   return {
     ok: false,
     text: `NOT ENOUGH SERVER STORAGE — need approximately ${formatGb(missing)} more.`,

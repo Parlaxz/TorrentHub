@@ -27,7 +27,17 @@ import type {
   StorageGateway,
 } from '../jobs/gateways';
 
+export interface StorageGatewayLogger {
+  warn: (obj: Record<string, unknown>, msg: string) => void;
+}
+
 export class StoragePolicyGateway implements StorageGateway {
+  private readonly warn: StorageGatewayLogger['warn'];
+
+  constructor(logger?: StorageGatewayLogger) {
+    this.warn = logger?.warn ?? (() => {});
+  }
+
   async statFreeBytes(volumePath: string): Promise<number | null> {
     try {
       const volume = await getVolumeSpace(volumePath);
@@ -133,7 +143,17 @@ export class StoragePolicyGateway implements StorageGateway {
         requiredPeakBytes: evaluation.requiredPeakBytes,
         deficitBytes: Math.max(0, evaluation.requiredPeakBytes - evaluation.freeBytes),
       };
-    } catch {
+    } catch (error) {
+      this.warn(
+        {
+          err: error instanceof Error ? error.message : String(error),
+          path: request.path,
+          selectedBytes,
+          fileCount,
+          zipRequired,
+        },
+        'storage preflight could not stat the volume; proceeding without blocking',
+      );
       return {
         ok: true, // storage unavailable: engine proceeds, UI surfaces null headroom
         freeBytes: null,

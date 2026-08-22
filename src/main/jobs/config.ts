@@ -20,7 +20,17 @@ export interface JobEngineConfig {
   historyLimit: number;
   /** Ownership tag handed to the torrent gateway. */
   ownershipTag: string;
+  /** Structured sink for engine diagnostics (preflight verdicts, etc.). */
+  logger: {
+    info: (obj: Record<string, unknown>, msg: string) => void;
+    warn: (obj: Record<string, unknown>, msg: string) => void;
+  };
 }
+
+const NOOP_LOGGER = {
+  info: () => {},
+  warn: () => {},
+};
 
 export const DEFAULT_CONFIG: Omit<JobEngineConfig, "jobsRoot" | "historyFilePath"> = {
   pollIntervalMs: 1000,
@@ -31,6 +41,7 @@ export const DEFAULT_CONFIG: Omit<JobEngineConfig, "jobsRoot" | "historyFilePath
   lowHeadroomBytes: 512 * 1024 * 1024,
   historyLimit: 100,
   ownershipTag: VIKING_RELAY_TAG,
+  logger: NOOP_LOGGER,
 };
 
 export function resolveConfig(overrides: Partial<JobEngineConfig>): JobEngineConfig {
