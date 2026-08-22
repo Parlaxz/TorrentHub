@@ -76,12 +76,15 @@ export interface ServerControllerOptions {
   host: CompositionHost;
   /** Invoked when the renderer requests app exit (confirmation is the UI's job). */
   requestAppExit: () => void;
+  /** "Friend mode" queue store (shared with the relay routes). */
+  directJobs?: import('./direct-job-store').DirectJobStore | null;
 }
 
 export class ServerController implements VikingRelayServerBridge {
   readonly #host: CompositionHost;
   readonly #events = new EventEmitter();
   readonly #requestAppExit: () => void;
+  readonly #directJobs: ServerControllerOptions['directJobs'];
 
   #graph: EngineGraph | null = null;
   #sweepDone = false;
@@ -94,6 +97,7 @@ export class ServerController implements VikingRelayServerBridge {
   constructor(options: ServerControllerOptions) {
     this.#host = options.host;
     this.#requestAppExit = options.requestAppExit;
+    this.#directJobs = options.directJobs ?? null;
     this.#events.setMaxListeners(50);
   }
 
@@ -242,7 +246,7 @@ export class ServerController implements VikingRelayServerBridge {
       }
     }
 
-    this.#relay = buildRelay(this.#host, graph.jobService, graph.auth);
+    this.#relay = buildRelay(this.#host, graph.jobService, graph.auth, this.#directJobs);
     await this.#relay.start();
 
     // The relay may have fallen back to a different adapter address (stale
@@ -337,6 +341,41 @@ export class ServerController implements VikingRelayServerBridge {
       .auth.listClients()
       .filter((c) => !c.revoked)
       .map(({ clientId, name, createdAt }) => ({ clientId, name, createdAt }));
+  }
+
+  /** Sends a link to a paired client's download queue ("friend mode"). */
+  async sendDirectJob(
+    source: string,
+    targetClientId: string,
+  ): Promise<{ ok: boolean; id?: string; error?: string }> {
+    if (!this.#directJobs) return { ok: false, error: 'direct jobs unavailable' };
+    const value = String(source ?? '').trim();
+    let kind: 'magnet' | 'url' | 'direct';
+    if (value.startsWith('magnet:')) kind = 'magnet';
+    else if (/^https?:\/\//i.test(value)) kind = 'url';
+    else return { ok: false, error: 'enter a magnet or http(s) link' };
+
+    const target = await this.listPairedClients();
+    const client = target.find((c) => c.clientId === targetClientId);
+    if (!client) return { ok: false, error: 'that client is no longer paired' };
+
+    const job = await this.#directJobs.add(value, kind, client.clientId, client.name);
+    this.#host.log.info({ jobId: job.id, target: client.name }, 'direct job sent');
+    return { ok: true, id: job.id };
+  }
+
+  async listDirectJobs(): Promise<
+    Array<{
+      id: string;
+      source: string;
+      sourceKind: string;
+      targetName: string;
+      state: 'queued' | 'accepted' | 'declined';
+      createdAt: string;
+    }>
+  > {
+    if (!this.#directJobs) return [];
+    return this.#directJobs.listAll();
   }
 
   async revokePairedClient(clientId: string): Promise<{ removed: boolean }> {

@@ -102,6 +102,7 @@ export function registerRoutes(app: FastifyInstance, deps: RelayAppDeps): void {
         selection: parsed.data.selection ?? null,
         zipRequired: parsed.data.zipRequired ?? null,
         idempotencyKey: resolveIdempotencyKey(req, parsed.data.idempotencyKey ?? null),
+        cleanup: parsed.data.cleanup ?? null,
       });
       return reply.code(201).send(record);
     });
@@ -135,5 +136,25 @@ export function registerRoutes(app: FastifyInstance, deps: RelayAppDeps): void {
       pairedClients: auth.listClients().filter((c) => !c.revoked).length,
       time: new Date().toISOString(),
     }));
+
+    // ---- direct downloads ("friend mode") ----
+    api.get("/direct-jobs", async (req) => {
+      if (!deps.directJobs) return { jobs: [] };
+      return { jobs: await deps.directJobs.queuedFor(req.client!.clientId) };
+    });
+
+    api.post("/direct-jobs/:id/accept", async (req) => {
+      const id = requireId(req);
+      const job = await deps.directJobs?.setState(id, "accepted");
+      if (!job) throw new ServiceError(404, "not_found", `no queued direct job ${id}`);
+      return { ok: true };
+    });
+
+    api.post("/direct-jobs/:id/decline", async (req) => {
+      const id = requireId(req);
+      const job = await deps.directJobs?.setState(id, "declined");
+      if (!job) throw new ServiceError(404, "not_found", `no queued direct job ${id}`);
+      return { ok: true };
+    });
   }, { prefix: "/v1" });
 }

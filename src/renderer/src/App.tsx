@@ -92,7 +92,7 @@ export default function App(): React.JSX.Element {
           <ServerApp />
         )}
       </main>
-      <GlobalSettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} />
+      <GlobalSettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} mode={state.mode} />
     </div>
   )
 }

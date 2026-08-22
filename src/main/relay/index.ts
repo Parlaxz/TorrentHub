@@ -18,10 +18,16 @@ export interface CreateRelayManagerOptions extends Omit<RelayManagerOptions, "bu
   auth?: AuthController;
   jobs: JobService;
   serverVersion?: string;
+  directJobs?: {
+    queuedFor(clientId: string): Promise<
+      Array<{ id: string; source: string; sourceKind: string; state: string }>
+    >;
+    setState(id: string, state: "accepted" | "declined"): Promise<unknown>;
+  } | null;
 }
 
 export function createRelayManager(options: CreateRelayManagerOptions): RelayManager {
-  const { auth, jobs, serverVersion, ...rest } = options;
+  const { auth, jobs, serverVersion, directJobs, ...rest } = options;
   let manager: RelayManager | null = null;
   manager = new RelayManager({
     ...rest,
@@ -30,6 +36,7 @@ export function createRelayManager(options: CreateRelayManagerOptions): RelayMan
         auth: auth ?? new AuthController(),
         jobs,
         serverVersion,
+        directJobs: directJobs ?? null,
         transportSnapshot: () => (manager !== null ? manager.snapshot() : null),
       }),
   });

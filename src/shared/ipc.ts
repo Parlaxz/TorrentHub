@@ -18,7 +18,12 @@ export const IpcChannels = {
   updatesGetState: 'updates:getState',
   updatesCheck: 'updates:check',
   updatesInstall: 'updates:install',
-  openLogsFolder: 'app:openLogsFolder'
+  openLogsFolder: 'app:openLogsFolder',
+  ddGetState: 'dd:getState',
+  ddSetSettings: 'dd:setSettings',
+  ddAccept: 'dd:accept',
+  ddDecline: 'dd:decline',
+  ddRefresh: 'dd:refresh'
 } as const
 
 // ---------------------------------------------------------------------------
@@ -91,6 +96,20 @@ export interface VikingRelayBridge {
   openLogsFolder(): Promise<boolean>
   /** Main-process log mirror (warn/error) so failures reach the DevTools console. */
   onLog(cb: (entry: { level: 'warn' | 'error' | 'info'; msg: string }) => void): () => void
+  /** Client mode "friend" receiver: settings + local queue. */
+  getDirectDownloadsState(): Promise<{
+    settings: { autoAccept: boolean; qbitUrl: string; qbitKeySet: boolean; downloadDir: string | null }
+    queue: Array<{ id: string; source: string; sourceKind: string; state: string; error?: string | null }>
+  }>
+  setDirectDownloadSettings(patch: {
+    autoAccept?: boolean
+    qbitUrl?: string
+    qbitKey?: string
+    downloadDir?: string | null
+  }): Promise<void>
+  acceptDirectDownload(id: string): Promise<void>
+  declineDirectDownload(id: string): Promise<void>
+  refreshDirectDownloads(): Promise<void>
 }
 
 declare global {
@@ -114,6 +133,19 @@ export interface IpcHandlers {
   [IpcChannels.updatesCheck]: () => Promise<UpdateState>
   [IpcChannels.updatesInstall]: () => Promise<UpdateState>
   [IpcChannels.openLogsFolder]: () => Promise<boolean>
+  [IpcChannels.ddGetState]: () => Promise<{
+    settings: { autoAccept: boolean; qbitUrl: string; qbitKeySet: boolean; downloadDir: string | null }
+    queue: Array<{ id: string; source: string; sourceKind: string; state: string; error?: string | null }>
+  }>
+  [IpcChannels.ddSetSettings]: (patch: {
+    autoAccept?: boolean
+    qbitUrl?: string
+    qbitKey?: string
+    downloadDir?: string | null
+  }) => Promise<void>
+  [IpcChannels.ddAccept]: (id: string) => Promise<void>
+  [IpcChannels.ddDecline]: (id: string) => Promise<void>
+  [IpcChannels.ddRefresh]: () => Promise<void>
 }
 
 export { AppModeSchema, AppSettingsPatchSchema, SecretKeySchema, SecretValueSchema }

@@ -24,6 +24,12 @@ const bridge: VikingRelayBridge = {
   checkForUpdates: () => ipcRenderer.invoke(IpcChannels.updatesCheck),
   installUpdate: () => ipcRenderer.invoke(IpcChannels.updatesInstall),
   openLogsFolder: () => ipcRenderer.invoke(IpcChannels.openLogsFolder),
+  getDirectDownloadsState: () => ipcRenderer.invoke(IpcChannels.ddGetState),
+  setDirectDownloadSettings: (patch: Parameters<VikingRelayBridge['setDirectDownloadSettings']>[0]) =>
+    ipcRenderer.invoke(IpcChannels.ddSetSettings, patch),
+  acceptDirectDownload: (id: string) => ipcRenderer.invoke(IpcChannels.ddAccept, id),
+  declineDirectDownload: (id: string) => ipcRenderer.invoke(IpcChannels.ddDecline, id),
+  refreshDirectDownloads: () => ipcRenderer.invoke(IpcChannels.ddRefresh),
   onLog: (cb: (entry: { level: 'warn' | 'error' | 'info'; msg: string }) => void) => {
     const listener = (_event: Electron.IpcRendererEvent, entry: { level: 'warn' | 'error' | 'info'; msg: string }): void =>
       cb(entry)
@@ -120,6 +126,9 @@ const serverBridge = {
   listPairedClients: () => ipcRenderer.invoke(ServerIpc.listPairedClients),
   revokePairedClient: (clientId: string) =>
     ipcRenderer.invoke(ServerIpc.revokePairedClient, clientId),
+  sendDirectJob: (source: string, targetClientId: string) =>
+    ipcRenderer.invoke(ServerIpc.sendDirectJob, source, targetClientId),
+  listDirectJobs: () => ipcRenderer.invoke(ServerIpc.listDirectJobs),
   resetProfile: () => ipcRenderer.invoke(ServerIpc.resetProfile),
 
   getActiveJob: () => ipcRenderer.invoke(ServerIpc.getActiveJob),

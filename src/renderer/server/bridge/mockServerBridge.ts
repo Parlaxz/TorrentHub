@@ -15,6 +15,7 @@ import type {
   QbitProbeResult,
   RadminInterfaceInfo,
   RadminStatus,
+  SentDirectJob,
   ServerCapabilities,
   TransferSnapshot,
   Unsubscribe,
@@ -260,6 +261,14 @@ export class MockServerBridge implements VikingRelayServerBridge {
 
   async revokePairedClient(_clientId: string): Promise<{ removed: boolean }> {
     return { removed: false };
+  }
+
+  async sendDirectJob(_source: string, _targetClientId: string): Promise<{ ok: boolean }> {
+    return { ok: true };
+  }
+
+  async listDirectJobs(): Promise<SentDirectJob[]> {
+    return [];
   }
 
   async resetProfile(): Promise<{ ok: boolean }> {

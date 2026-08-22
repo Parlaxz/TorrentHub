@@ -23,6 +23,13 @@ export interface RelayAppDeps {
   serverVersion?: string;
   bodyLimit?: number;
   logger?: FastifyServerOptions["logger"];
+  /** "Friend mode" queue: jobs the server user sent to paired clients. */
+  directJobs?: {
+    queuedFor(clientId: string): Promise<
+      Array<{ id: string; source: string; sourceKind: string; state: string }>
+    >;
+    setState(id: string, state: "accepted" | "declined"): Promise<unknown>;
+  } | null;
 }
 
 export const DEFAULT_BODY_LIMIT_BYTES = 128 * 1024;

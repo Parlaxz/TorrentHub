@@ -6,6 +6,7 @@ import type { Logger } from 'pino'
 import type { SecretStore } from './secrets'
 import type { AppSettingsStore } from './settings-store'
 import type { AppUpdater } from './updater'
+import type { DirectDownloadsService } from './client-relay/direct-downloads'
 
 interface IpcContext {
   store: AppSettingsStore
@@ -14,6 +15,7 @@ interface IpcContext {
   versions: AppState['versions']
   updater: AppUpdater
   logsDir: string
+  directDownloads: DirectDownloadsService
 }
 
 function badRequest(message: string): Error {
@@ -69,6 +71,24 @@ export function registerIpcHandlers(ctx: IpcContext): void {
       const result = await shell.openPath(ctx.logsDir)
       if (result) ctx.log.warn({ err: result }, 'openLogsFolder failed')
       return !result
+    },
+    [IpcChannels.ddGetState]: async () => ({
+      settings: ctx.directDownloads.getSettings(),
+      queue: await ctx.directDownloads.listLocal(),
+    }),
+    [IpcChannels.ddSetSettings]: async (rawPatch) => {
+      const patch = (rawPatch ?? {}) as Parameters<DirectDownloadsService['setSettings']>[0]
+      await ctx.directDownloads.setSettings(patch)
+      void ctx.directDownloads.pollOnce().catch(() => {})
+    },
+    [IpcChannels.ddAccept]: async (rawId) => {
+      await ctx.directDownloads.accept(String(rawId))
+    },
+    [IpcChannels.ddDecline]: async (rawId) => {
+      await ctx.directDownloads.decline(String(rawId))
+    },
+    [IpcChannels.ddRefresh]: async () => {
+      await ctx.directDownloads.pollOnce()
     }
   }
 
@@ -103,4 +123,25 @@ export function registerIpcHandlers(ctx: IpcContext): void {
   ipcMain.handle(IpcChannels.updatesCheck, () => handlers[IpcChannels.updatesCheck]())
   ipcMain.handle(IpcChannels.updatesInstall, () => handlers[IpcChannels.updatesInstall]())
   ipcMain.handle(IpcChannels.openLogsFolder, () => handlers[IpcChannels.openLogsFolder]())
+  ipcMain.handle(IpcChannels.ddGetState, () => handlers[IpcChannels.ddGetState]())
+  ipcMain.handle(IpcChannels.ddSetSettings, (_e, patch: unknown) => {
+    const p = (patch ?? {}) as Record<string, unknown>
+    const clean: { autoAccept?: boolean; qbitUrl?: string; qbitKey?: string; downloadDir?: string | null } = {}
+    if (typeof p.autoAccept === 'boolean') clean.autoAccept = p.autoAccept
+    if (typeof p.qbitUrl === 'string' && /^https?:\/\//i.test(p.qbitUrl)) clean.qbitUrl = p.qbitUrl
+    if (typeof p.qbitKey === 'string' && p.qbitKey.trim().length > 0) clean.qbitKey = p.qbitKey
+    if (p.downloadDir === null || typeof p.downloadDir === 'string') {
+      clean.downloadDir = typeof p.downloadDir === 'string' && p.downloadDir.trim() ? p.downloadDir.trim() : null
+    }
+    return handlers[IpcChannels.ddSetSettings](clean)
+  })
+  ipcMain.handle(IpcChannels.ddAccept, (_e, id: unknown) => {
+    if (typeof id !== 'string' || id.length === 0) throw badRequest('invalid id')
+    return handlers[IpcChannels.ddAccept](id)
+  })
+  ipcMain.handle(IpcChannels.ddDecline, (_e, id: unknown) => {
+    if (typeof id !== 'string' || id.length === 0) throw badRequest('invalid id')
+    return handlers[IpcChannels.ddDecline](id)
+  })
+  ipcMain.handle(IpcChannels.ddRefresh, () => handlers[IpcChannels.ddRefresh]())
 }

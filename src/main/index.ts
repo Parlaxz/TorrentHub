@@ -8,10 +8,12 @@ import { SecretStore } from './secrets'
 import { registerIpcHandlers } from './ipc'
 import { AppUpdater } from './updater'
 import { ClientRelayService } from './client-relay/service'
+import { DirectDownloadsService } from './client-relay/direct-downloads'
 import { registerClientBridgeIpc } from './server/ipc-server'
 import { registerServerBridgeIpc } from './server/ipc-server'
 import { ServerController } from './server/controller'
 import { SECRET_QBIT_API_KEY } from './server/composition'
+import { DirectJobStore } from './server/direct-job-store'
 
 // ---------------------------------------------------------------------------
 // Window + security
@@ -194,12 +196,29 @@ if (!gotLock) {
     const updater = new AppUpdater(log, app.getVersion())
     updater.checkOnStartup()
 
+    // Client Mode backend (token stays in main via safeStorage).
+    const clientRelay = new ClientRelayService(settings, secrets, {
+      warn: (obj, msg) => log.warn(obj, msg),
+    })
+    registerClientBridgeIpc(clientRelay)
+
+    // "Friend mode" receiver: poll the paired server for direct downloads.
+    const directDownloads = new DirectDownloadsService(
+      settings,
+      secrets,
+      clientRelay,
+      paths.userDataDir,
+      log,
+    )
+    setInterval(() => void directDownloads.pollOnce(), 5000).unref?.()
+
     registerIpcHandlers({
       store: settings,
       secrets,
       log,
       updater,
       logsDir: paths.logsDir,
+      directDownloads,
       versions: {
         app: app.getVersion(),
         electron: process.versions.electron ?? 'unknown',
@@ -208,16 +227,12 @@ if (!gotLock) {
       }
     })
 
-    // Client Mode backend (token stays in main via safeStorage).
-    const clientRelay = new ClientRelayService(settings, secrets, {
-      warn: (obj, msg) => log.warn(obj, msg),
-    })
-    registerClientBridgeIpc(clientRelay)
-
     // Server Mode composition + bridge.
+    const directJobStore = new DirectJobStore(join(paths.userDataDir, 'data', 'direct-jobs.json'))
     let serverController: ServerController | null = null
     serverController = new ServerController({
       host: { settings, secrets, log, userDataDir: paths.userDataDir },
+      directJobs: directJobStore,
       requestAppExit: () => {
         // Exit confirmation for active transfers happens in the renderer UI;
         // reaching this callback means the user confirmed.

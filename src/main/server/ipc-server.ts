@@ -13,6 +13,16 @@ import type { ClientRelayService } from '../client-relay/service'
 import { ClientIpc } from '../client-relay/ipc-channels'
 import { ServerEvents, ServerIpc } from './ipc-channels'
 
+/** Sent direct-download job view (server side). */
+export interface SentDirectJob {
+  id: string;
+  source: string;
+  sourceKind: string;
+  targetName: string;
+  state: string;
+  createdAt: string;
+}
+
 /**
  * Wraps a handler so failures are logged (file + console) before the
  * rejection reaches the renderer. Without this, packaged-app IPC errors
@@ -68,6 +78,10 @@ export function registerServerBridgeIpc(controller: ServerController): void {
     controller.revokePairedClient(String(clientId ?? '')),
   )
   handle(ServerIpc.resetProfile, () => controller.resetProfile())
+  handle(ServerIpc.sendDirectJob, (source: unknown, targetClientId: unknown) =>
+    controller.sendDirectJob(String(source ?? ''), String(targetClientId ?? '')),
+  )
+  handle(ServerIpc.listDirectJobs, () => controller.listDirectJobs())
   handle(ServerIpc.getActiveJob, () => controller.getActiveJob())
   handle(ServerIpc.getHistory, (limit: unknown) => controller.getHistory(Number(limit) || 20))
   handle(ServerIpc.getArchivedHistory, (limit: unknown) =>

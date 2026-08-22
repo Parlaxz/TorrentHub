@@ -113,6 +113,16 @@ export interface PairedClientInfo {
   createdAt: string;
 }
 
+/** A download sent to a paired client ("friend mode"). */
+export interface SentDirectJob {
+  id: string;
+  source: string;
+  sourceKind: string;
+  targetName: string;
+  state: "queued" | "accepted" | "declined";
+  createdAt: string;
+}
+
 /* ---------------------------------- health ---------------------------------- */
 
 export type SimpleHealthState = "ok" | "warn" | "error" | "unknown";
@@ -277,6 +287,9 @@ export interface VikingRelayServerBridge {
   listPairedClients?(): Promise<PairedClientInfo[]>;
   /** Server-side disconnect: revokes the client's bearer token. */
   revokePairedClient?(clientId: string): Promise<{ removed: boolean }>;
+  /** Send a magnet/link to a paired client's local download queue. */
+  sendDirectJob?(source: string, targetClientId: string): Promise<{ ok: boolean; id?: string; error?: string }>;
+  listDirectJobs?(): Promise<SentDirectJob[]>;
   /**
    * Wipes the server profile (settings, secrets, pairings) and returns the
    * app to first-run onboarding. Destructive — UI must confirm first.

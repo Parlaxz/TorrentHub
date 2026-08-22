@@ -139,6 +139,12 @@ export function buildRelay(
   host: CompositionHost,
   jobService: EngineJobService,
   auth: AuthController,
+  directJobs?: {
+    queuedFor(clientId: string): Promise<
+      Array<{ id: string; source: string; sourceKind: string; state: string }>
+    >;
+    setState(id: string, state: 'accepted' | 'declined'): Promise<unknown>;
+  } | null,
 ): RelayManager {
   const settings = host.settings.get();
   return createRelayManager({
@@ -146,6 +152,7 @@ export function buildRelay(
     jobs: jobService,
     port: settings.serverPort,
     pollIntervalMs: 5000,
+    directJobs: directJobs ?? null,
     selection: {
       overrideAddress: settings.radminInterfaceId ?? null,
       preferredAdapterNames: [],

@@ -8,6 +8,7 @@ import { Button, Card, CardTitle, StatusDot } from "../components/ui";
 import { ActiveTransferCard } from "./ActiveTransferCard";
 import { HistoryList } from "./HistoryList";
 import { PairingModal } from "./PairingModal";
+import { SendDirectModal } from "./SendDirectModal";
 import { SettingsPanel } from "./SettingsPanel";
 import { StorageCard } from "./StorageCard";
 import { ExitConfirmDialog, InterruptedBanner, OfflineBanner, interruptedActions } from "./banners";
@@ -18,6 +19,7 @@ export function Dashboard({ bridge }: { bridge: VikingRelayServerBridge }) {
   const { health, job, history, capabilities, refreshHistory } = useRuntime();
   const [pairingOpen, setPairingOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [sendDirectOpen, setSendDirectOpen] = useState(false);
   const [exitOpen, setExitOpen] = useState(false);
   const [showArchived, setShowArchived] = useState(false);
   const [archivedEntries, setArchivedEntries] = useState<HistoryEntry[]>([]);
@@ -118,6 +120,9 @@ export function Dashboard({ bridge }: { bridge: VikingRelayServerBridge }) {
               <Button variant="primary" onClick={() => setPairingOpen(true)} data-testid="pair-client">
                 Pair Client
               </Button>
+              <Button onClick={() => setSendDirectOpen(true)} data-testid="send-to-friend">
+                Send to friend
+              </Button>
               <Button onClick={() => setSettingsOpen(true)} data-testid="open-settings">
                 Settings
               </Button>
@@ -157,6 +162,7 @@ export function Dashboard({ bridge }: { bridge: VikingRelayServerBridge }) {
       </div>
 
       <PairingModal open={pairingOpen} onClose={() => setPairingOpen(false)} />
+      <SendDirectModal open={sendDirectOpen} onClose={() => setSendDirectOpen(false)} bridge={bridge} />
       <SettingsPanel open={settingsOpen} onClose={() => setSettingsOpen(false)} bridge={bridge} />
       <ExitConfirmDialog
         open={exitOpen}

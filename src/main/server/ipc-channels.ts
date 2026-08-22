@@ -15,6 +15,8 @@ export const ServerIpc = {
   listPairedClients: 'server:listPairedClients',
   revokePairedClient: 'server:revokePairedClient',
   resetProfile: 'server:resetProfile',
+  sendDirectJob: 'server:sendDirectJob',
+  listDirectJobs: 'server:listDirectJobs',
   getActiveJob: 'server:getActiveJob',
   getHistory: 'server:getHistory',
   getArchivedHistory: 'server:getArchivedHistory',

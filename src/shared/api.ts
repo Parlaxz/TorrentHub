@@ -20,7 +20,10 @@ export const ApiRoutes = {
   recheckStorage: (jobId: string): string =>
     `/v1/jobs/${encodeURIComponent(jobId)}/recheck-storage`,
   history: '/v1/history',
-  serverStatus: '/v1/server/status'
+  serverStatus: '/v1/server/status',
+  directJobs: '/v1/direct-jobs',
+  directJobAction: (id: string, action: 'accept' | 'decline'): string =>
+    `/v1/direct-jobs/${encodeURIComponent(id)}/${action}`
 } as const
 
 /** Base URL of a relay endpoint, e.g. `http://26.14.203.87:47821`. */

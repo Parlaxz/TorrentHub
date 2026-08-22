@@ -107,6 +107,16 @@ export class ClientRelayService {
     return this.secrets.get(SECRET_CLIENT_BEARER)
   }
 
+  /** Token access for the direct-downloads poller (stays in main). */
+  tokenForPolling(): string | null {
+    return this.token()
+  }
+
+  /** Raw client bound to the saved connection (direct-downloads poller). */
+  httpClient(): RelayHttpClient | null {
+    return this.client()
+  }
+
   private client(): RelayHttpClient | null {
     const conn = this.getConnection()
     return conn ? new RelayHttpClient(conn) : null
