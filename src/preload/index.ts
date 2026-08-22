@@ -107,6 +107,10 @@ const serverBridge = {
   getHealth: () => ipcRenderer.invoke(ServerIpc.getHealth),
 
   generatePairingCode: () => ipcRenderer.invoke(ServerIpc.generatePairingCode),
+  listPairedClients: () => ipcRenderer.invoke(ServerIpc.listPairedClients),
+  revokePairedClient: (clientId: string) =>
+    ipcRenderer.invoke(ServerIpc.revokePairedClient, clientId),
+  resetProfile: () => ipcRenderer.invoke(ServerIpc.resetProfile),
 
   getActiveJob: () => ipcRenderer.invoke(ServerIpc.getActiveJob),
   getHistory: (limit: number) => ipcRenderer.invoke(ServerIpc.getHistory, limit),

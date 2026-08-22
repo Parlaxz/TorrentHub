@@ -12,6 +12,9 @@ export function PairingModal({ open, onClose }: { open: boolean; onClose: () => 
   const { pairing, generatePairing } = useRuntime();
   const now = useNow(250);
   const countdown = pairing ? pairingCountdown(pairing, now) : null;
+  // The backend generates a dashless 8-char code; display it grouped for readability.
+  const rawCode = pairing ? pairing.code.replace(/[\s-]+/g, "") : "";
+  const displayCode = pairing ? `${rawCode.slice(0, 4)}-${rawCode.slice(4)}` : null;
 
   // Offer a fresh code as soon as the panel opens.
   useEffect(() => {
@@ -28,7 +31,7 @@ export function PairingModal({ open, onClose }: { open: boolean; onClose: () => 
               data-testid="pairing-code"
               role="status"
             >
-              {pairing.code}
+              {displayCode}
             </p>
             <p className="text-center text-sm text-zinc-500 dark:text-zinc-400" data-testid="pairing-countdown" aria-live="polite">
               Expires in{" "}

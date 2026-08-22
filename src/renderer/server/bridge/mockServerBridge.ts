@@ -10,6 +10,7 @@ import type {
   AppSettings,
   HealthSnapshot,
   HistoryEntry,
+  PairedClientInfo,
   PairingInfo,
   QbitProbeResult,
   RadminInterfaceInfo,
@@ -248,6 +249,18 @@ export class MockServerBridge implements VikingRelayServerBridge {
     };
     this.pairingBus.emit(this.pairing);
     return this.pairing;
+  }
+
+  async listPairedClients(): Promise<PairedClientInfo[]> {
+    return [];
+  }
+
+  async revokePairedClient(_clientId: string): Promise<{ removed: boolean }> {
+    return { removed: false };
+  }
+
+  async resetProfile(): Promise<{ ok: boolean }> {
+    return { ok: true };
   }
 
   /* ------------------------------------ jobs ----------------------------------- */

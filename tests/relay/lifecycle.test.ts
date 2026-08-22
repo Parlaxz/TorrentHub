@@ -147,7 +147,7 @@ test("never falls back to other adapters or 0.0.0.0 when radmin is absent", asyn
   }
 });
 
-test("rebind restarts on an explicit safe address and rejects unknown ones", async () => {
+test("rebind restarts on an explicit safe address and falls back when the pinned one is gone", async () => {
   const map: InterfaceMap = radminMap("127.0.0.1");
   const manager = new RelayManager({
     port: 0,
@@ -160,9 +160,11 @@ test("rebind restarts on an explicit safe address and rejects unknown ones", asy
     await manager.start();
     assert.equal(manager.snapshot().state, "listening");
 
+    // Stale pinned address: Radmin re-issued a new IP — fall back instead of
+    // sitting unavailable while the VPN is up.
     const bad = await manager.rebind({ address: "203.0.113.99" });
-    assert.equal(bad.state, "unavailable");
-    assert.equal(bad.bindError, "override_address_not_found");
+    assert.equal(bad.state, "listening");
+    assert.equal(bad.host, "127.0.0.1");
 
     const good = await manager.rebind({ address: "127.0.0.1" });
     assert.equal(good.state, "listening");

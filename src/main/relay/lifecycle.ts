@@ -198,12 +198,29 @@ export class RelayManager {
     this.events.emit("change", this.snapshot());
   }
 
+  /**
+   * Adapter scan with stale-pin tolerance: when the pinned address no longer
+   * exists (e.g. Radmin re-issued a new IPv4 after a reconnect), fall back to
+   * automatic selection — radmin-named adapters still win — instead of
+   * sitting unavailable while the VPN is up.
+   */
+  private scanAdapters(): AdapterSelection {
+    const scan = selectAdapter(this.enumerate(), this.selection);
+    if (!scan.selected && scan.reason === "override_not_found") {
+      this.logger.warn(
+        `pinned adapter address ${String(this.selection.overrideAddress)} not found; falling back to automatic selection`,
+      );
+      return selectAdapter(this.enumerate(), { ...this.selection, overrideAddress: null });
+    }
+    return scan;
+  }
+
   private async startLocked(): Promise<RelaySnapshot> {
     if (this.state === "listening" || this.state === "starting") return this.snapshot();
     await this.stopListenerLocked();
     this.apply({ state: "starting", bindError: null });
 
-    const scan = selectAdapter(this.enumerate(), this.selection);
+    const scan = this.scanAdapters();
     this.apply({ candidates: scan.candidates });
 
     if (!scan.selected) {
@@ -285,11 +302,18 @@ export class RelayManager {
   private async watchTickLocked(): Promise<void> {
     if (this.state === "stopped" || this.state === "starting") return;
     const prev = { state: this.state, adapterName: this.adapterName, address: this.address };
-    const scan = selectAdapter(this.enumerate(), this.selection);
+    const scan = this.scanAdapters();
     this.apply({ candidates: scan.candidates });
 
     const decision = planWatchTick(prev, scan);
-    if (decision.action === "keep") return;
+    if (decision.action === "keep") {
+      // Recover from "no adapter existed at start": once any candidate
+      // appears (Radmin came up), retry binding.
+      if (this.state === "unavailable" && scan.selected) {
+        await this.startLocked();
+      }
+      return;
+    }
 
     if (decision.action === "shutdown") {
       await this.stopListenerLocked();

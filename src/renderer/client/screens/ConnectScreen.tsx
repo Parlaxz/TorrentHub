@@ -2,15 +2,25 @@ import { useState, type FormEvent } from "react";
 import { Button, ErrorText, Field, Panel, Spinner, TextInput } from "../components/ui";
 import type { SavedConnection } from "../lib/bridge";
 
-const CODE_RE = /^[A-Za-z0-9]{4}-[A-Za-z0-9]{4}$/;
 const HOST_RE = /^(localhost|\d{1,3}(\.\d{1,3}){3}|[a-zA-Z0-9-]+(\.[a-zA-Z0-9-]+)*)$/;
+
+/**
+ * Accepts "XXXX-XXXX", "XXXXXXXX", and stray spaces; returns the canonical
+ * dashless uppercase form the server compares against.
+ */
+export function normalizePairingCode(raw: string): string {
+  return raw.replace(/[\s-]+/g, "").toUpperCase();
+}
 
 export function validatePairInput(host: string, port: string, code: string): string | null {
   if (!host.trim()) return "Enter the server IP or hostname.";
   if (!HOST_RE.test(host.trim())) return "That doesn't look like a valid IP or hostname.";
   const p = Number(port);
   if (!Number.isInteger(p) || p < 1 || p > 65535) return "Port must be between 1 and 65535.";
-  if (!CODE_RE.test(code.trim())) return "Pairing code must look like XXXX-XXXX.";
+  const normalized = normalizePairingCode(code);
+  if (!/^[A-Z0-9]{8}$/.test(normalized)) {
+    return "Pairing code must be 8 characters — with or without the dash (XXXX-XXXX).";
+  }
   return null;
 }
 
@@ -48,7 +58,7 @@ export function ConnectScreen({
     setError(null);
     setBusy(true);
     try {
-      const res = await bridge.pair({ host: host.trim(), port: Number(port), code: code.trim().toUpperCase() });
+      const res = await bridge.pair({ host: host.trim(), port: Number(port), code: normalizePairingCode(code) });
       if (res.ok) onPaired(res.value);
       else setError(res.error || "Pairing failed. Check the address and code.");
     } catch (err) {

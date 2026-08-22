@@ -24,6 +24,7 @@ import type {
   DriveInfo,
   HealthSnapshot,
   HistoryEntry,
+  PairedClientInfo,
   PairingInfo,
   QbitProbeResult,
   RadminInterfaceInfo,
@@ -48,6 +49,7 @@ import { collectIpv4Candidates, DEFAULT_RADMIN_ADAPTER_PATTERN } from '../relay/
 import type { RelayManager } from '../relay/lifecycle';
 import { getVolumeSpace } from '../storage';
 import { VikingClient } from '../viking';
+import { DEFAULT_SETTINGS } from '@shared/settings';
 import {
   buildEngineGraph,
   buildQbitService,
@@ -239,6 +241,20 @@ export class ServerController implements VikingRelayServerBridge {
     this.#relay = buildRelay(this.#host, graph.jobService, graph.auth);
     await this.#relay.start();
 
+    // The relay may have fallen back to a different adapter address (stale
+    // pin); re-pin so the next start binds directly.
+    const snap = this.#relay.snapshot();
+    if (snap.state === 'listening' && snap.address) {
+      const pinned = this.#host.settings.get().radminInterfaceId;
+      if (pinned && pinned !== snap.address) {
+        this.#host.settings.update({ radminInterfaceId: snap.address });
+        this.#host.log.info(
+          { from: pinned, to: snap.address },
+          're-pinned radmin interface to actual address',
+        );
+      }
+    }
+
     this.startPushLoop();
     return this.getHealth();
   }
@@ -276,6 +292,9 @@ export class ServerController implements VikingRelayServerBridge {
     } else if (snapshot?.state === 'stopped') {
       radminState = 'warn';
       radminDetail = 'server stopped';
+    } else {
+      radminState = 'unknown';
+      radminDetail = 'server not started';
     }
 
     const qbit = await this.qbitHealth();
@@ -306,6 +325,22 @@ export class ServerController implements VikingRelayServerBridge {
     };
     this.#events.emit('pairing', info);
     return info;
+  }
+
+  /** Active (non-revoked) paired clients — pairing persists until revoked. */
+  async listPairedClients(): Promise<PairedClientInfo[]> {
+    return this.ensureGraph()
+      .auth.listClients()
+      .filter((c) => !c.revoked)
+      .map(({ clientId, name, createdAt }) => ({ clientId, name, createdAt }));
+  }
+
+  async revokePairedClient(clientId: string): Promise<{ removed: boolean }> {
+    const removed = this.ensureGraph().auth.revokeClient(String(clientId)) > 0;
+    if (removed) {
+      this.#host.log.info({ clientId }, 'paired client disconnected by server');
+    }
+    return { removed };
   }
 
   /* ------------------------------------------------------------------ */
@@ -381,6 +416,48 @@ export class ServerController implements VikingRelayServerBridge {
     if (ok) this.swapQbitService();
     this.#qbitProbe = null;
     return { ok };
+  }
+
+  /**
+   * Wipes the server profile: stops the relay, revokes every paired client,
+   * deletes all server secrets and resets settings to first-run defaults.
+   * Transfer history and downloaded data on disk are left untouched.
+   */
+  async resetProfile(): Promise<{ ok: boolean }> {
+    this.stopPushLoop();
+    if (this.#relay) {
+      try {
+        await this.#relay.stop();
+      } catch (error) {
+        this.#host.log.warn({ err: error }, 'relay stop during profile reset failed');
+      } finally {
+        this.#relay = null;
+      }
+    }
+    const revoked = this.ensureGraph().auth.revokeAll();
+    for (const key of [
+      SECRET_QBIT_API_KEY,
+      SECRET_VIKING_USER_HASH,
+      'auth.tokenSecret',
+      'auth.tokens',
+    ]) {
+      this.#host.secrets.delete(key);
+    }
+    this.#host.settings.update({
+      mode: null,
+      serverPort: DEFAULT_SETTINGS.serverPort,
+      qbittorrentBaseUrl: DEFAULT_SETTINGS.qbittorrentBaseUrl,
+      dataDir: null,
+      radminInterfaceId: null,
+      startWithWindows: false,
+      preventSleepDuringTransfers: true,
+    });
+    applyLoginItem(false);
+    this.#qbitService = null;
+    this.#vikingClient = null;
+    this.#qbitProbe = null;
+    this.#host.log.info({ revoked }, 'server profile reset; returning to onboarding');
+    return { ok: true };
   }
 
   async capabilities(): Promise<ServerCapabilities> {

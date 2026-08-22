@@ -38,8 +38,8 @@ export const jobCreateSchema = z.strictObject({
 export const pairRequestSchema = z.strictObject({
   code: z
     .string()
-    .trim()
-    .regex(/^[A-HJ-KM-NP-Z2-9]{6,10}$/i, { message: "invalid pairing code format" }),
+    .transform((v) => v.replace(/[\s-]+/g, ""))
+    .pipe(z.string().regex(/^[A-HJ-KM-NP-Z2-9]{6,10}$/i, { message: "invalid pairing code format" })),
   name: z.string().trim().min(1).max(64).optional(),
 });
 

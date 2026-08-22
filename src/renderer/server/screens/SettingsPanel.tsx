@@ -4,7 +4,7 @@
  */
 
 import { useEffect, useState } from "react";
-import type { VikingRelayServerBridge } from "../bridge/types";
+import type { PairedClientInfo, VikingRelayServerBridge } from "../bridge/types";
 import { SECRET_MASK, secretDisplay } from "../domain/secrets";
 import { useRuntime } from "../state/RuntimeContext";
 import { Button, Modal, TextField, Toggle } from "../components/ui";
@@ -24,6 +24,45 @@ export function SettingsPanel({
   const [qbitUrl, setQbitUrl] = useState("");
   const [qbitKeyInput, setQbitKeyInput] = useState("");
   const [vikingHashInput, setVikingHashInput] = useState("");
+  const [pairedClients, setPairedClients] = useState<PairedClientInfo[] | null>(null);
+  const [resetting, setResetting] = useState(false);
+
+  useEffect(() => {
+    if (!open || !bridge.listPairedClients) return;
+    let cancelled = false;
+    bridge
+      .listPairedClients()
+      .then((clients) => {
+        if (!cancelled) setPairedClients(clients);
+      })
+      .catch(() => {
+        if (!cancelled) setPairedClients([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [open, bridge]);
+
+  const disconnectClient = async (clientId: string): Promise<void> => {
+    if (!bridge.revokePairedClient) return;
+    await bridge.revokePairedClient(clientId);
+    if (bridge.listPairedClients) setPairedClients(await bridge.listPairedClients());
+  };
+
+  const resetProfile = async (): Promise<void> => {
+    if (!bridge.resetProfile) return;
+    const confirmed = window.confirm(
+      "Reset the server profile? This stops the server, disconnects every paired client, and erases all settings and saved keys. Downloaded files and history stay on disk.",
+    );
+    if (!confirmed) return;
+    setResetting(true);
+    try {
+      await bridge.resetProfile();
+      window.location.reload();
+    } finally {
+      setResetting(false);
+    }
+  };
 
   useEffect(() => {
     if (!settings) return;
@@ -154,6 +193,65 @@ export function SettingsPanel({
         <p className="text-xs text-zinc-500 dark:text-zinc-500">
           Mode: Server. Switch to Client mode from the tray menu.
         </p>
+
+        {bridge.listPairedClients ? (
+          <div data-testid="paired-clients-section">
+            <h3 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+              Paired clients
+            </h3>
+            <p className="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">
+              Paired PCs stay connected until you disconnect them here.
+            </p>
+            {pairedClients === null ? (
+              <p className="mt-2 text-xs text-zinc-500 dark:text-zinc-400">Loading…</p>
+            ) : pairedClients.length === 0 ? (
+              <p className="mt-2 text-xs text-zinc-500 dark:text-zinc-400" data-testid="no-paired-clients">
+                No clients paired yet.
+              </p>
+            ) : (
+              <ul className="mt-2 space-y-1.5">
+                {pairedClients.map((client) => (
+                  <li
+                    key={client.clientId}
+                    className="flex items-center justify-between gap-3 rounded-md border border-zinc-200 px-3 py-2 text-sm dark:border-zinc-800"
+                  >
+                    <span className="min-w-0">
+                      <span className="block truncate font-medium text-zinc-900 dark:text-zinc-100">
+                        {client.name}
+                      </span>
+                      <span className="block text-xs text-zinc-500 dark:text-zinc-400">
+                        Paired {new Date(client.createdAt).toLocaleString()}
+                      </span>
+                    </span>
+                    <Button variant="ghost" onClick={() => void disconnectClient(client.clientId)}>
+                      Disconnect
+                    </Button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        ) : null}
+
+        <hr className="border-zinc-100 dark:border-zinc-800" />
+
+        <div className="rounded-md border border-red-200 p-3 dark:border-red-900/60" data-testid="danger-zone">
+          <h3 className="text-sm font-semibold text-red-600 dark:text-red-400">Danger zone</h3>
+          <p className="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">
+            Erases all settings, saved keys, and pairings, then restarts first-time setup.
+          </p>
+          {bridge.resetProfile ? (
+            <Button
+              variant="ghost"
+              disabled={resetting}
+              onClick={() => void resetProfile()}
+              className="mt-2 text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950"
+              data-testid="reset-profile"
+            >
+              Reset server profile…
+            </Button>
+          ) : null}
+        </div>
 
         <div className="flex justify-end gap-2 border-t border-zinc-100 pt-4 dark:border-zinc-800">
           <Button variant="ghost" onClick={onClose}>

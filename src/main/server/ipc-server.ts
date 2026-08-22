@@ -63,6 +63,11 @@ export function registerServerBridgeIpc(controller: ServerController): void {
   handle(ServerIpc.stopServer, () => controller.stopServer())
   handle(ServerIpc.getHealth, () => controller.getHealth())
   handle(ServerIpc.generatePairingCode, () => controller.generatePairingCode())
+  handle(ServerIpc.listPairedClients, () => controller.listPairedClients())
+  handle(ServerIpc.revokePairedClient, (clientId: unknown) =>
+    controller.revokePairedClient(String(clientId ?? '')),
+  )
+  handle(ServerIpc.resetProfile, () => controller.resetProfile())
   handle(ServerIpc.getActiveJob, () => controller.getActiveJob())
   handle(ServerIpc.getHistory, (limit: unknown) =>
     controller.getHistory(Number(limit) || 20),

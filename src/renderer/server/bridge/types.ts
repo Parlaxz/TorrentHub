@@ -106,6 +106,13 @@ export interface PairingInfo {
   ttlSeconds: number;
 }
 
+/** A currently-paired client. Pairing persists until explicitly revoked. */
+export interface PairedClientInfo {
+  clientId: string;
+  name: string;
+  createdAt: string;
+}
+
 /* ---------------------------------- health ---------------------------------- */
 
 export type SimpleHealthState = "ok" | "warn" | "error" | "unknown";
@@ -256,6 +263,15 @@ export interface VikingRelayServerBridge {
 
   /* pairing */
   generatePairingCode(): Promise<PairingInfo>;
+  /** Active paired clients; empty on older builds. */
+  listPairedClients?(): Promise<PairedClientInfo[]>;
+  /** Server-side disconnect: revokes the client's bearer token. */
+  revokePairedClient?(clientId: string): Promise<{ removed: boolean }>;
+  /**
+   * Wipes the server profile (settings, secrets, pairings) and returns the
+   * app to first-run onboarding. Destructive — UI must confirm first.
+   */
+  resetProfile?(): Promise<{ ok: boolean }>;
 
   /* jobs */
   getActiveJob(): Promise<TransferSnapshot | null>;
