@@ -1,7 +1,7 @@
 /** Server dashboard — the appliance control panel. */
 
 import { useMemo, useState } from "react";
-import type { VikingRelayServerBridge } from "../bridge/types";
+import type { HistoryEntry, VikingRelayServerBridge } from "../bridge/types";
 import { isRadminOffline, readinessRows } from "../domain/derive";
 import { useRuntime } from "../state/RuntimeContext";
 import { Button, Card, CardTitle, StatusDot } from "../components/ui";
@@ -19,6 +19,28 @@ export function Dashboard({ bridge }: { bridge: VikingRelayServerBridge }) {
   const [pairingOpen, setPairingOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [exitOpen, setExitOpen] = useState(false);
+  const [showArchived, setShowArchived] = useState(false);
+  const [archivedEntries, setArchivedEntries] = useState<HistoryEntry[]>([]);
+
+  const toggleArchived = async (): Promise<void> => {
+    const next = !showArchived;
+    setShowArchived(next);
+    if (next && bridge.getArchivedHistory) {
+      try {
+        setArchivedEntries(await bridge.getArchivedHistory(50));
+      } catch {
+        setArchivedEntries([]);
+      }
+    }
+  };
+
+  const archiveJob = async (jobId: string, archived: boolean): Promise<void> => {
+    if (bridge.setJobArchived) await bridge.setJobArchived(jobId, archived);
+    setArchivedEntries((list) =>
+      archived ? list : list.filter((e) => e.id !== jobId),
+    );
+    await refreshHistory();
+  };
 
   const rows = useMemo(() => (health ? readinessRows(health) : []), [health]);
   const offline = health ? isRadminOffline(health) : false;
@@ -103,7 +125,32 @@ export function Dashboard({ bridge }: { bridge: VikingRelayServerBridge }) {
           </Card>
 
           {activeJob ? <ActiveTransferCard job={activeJob} /> : null}
-          <HistoryList entries={history} />
+          <div className="flex items-center justify-between">
+            <label className="flex cursor-pointer items-center gap-2 text-xs text-zinc-600 dark:text-zinc-400">
+              <input
+                type="checkbox"
+                checked={showArchived}
+                onChange={() => void toggleArchived()}
+                className="h-3.5 w-3.5"
+                data-testid="show-archived"
+              />
+              Show archived
+            </label>
+          </div>
+          {showArchived ? (
+            <HistoryList
+              entries={archivedEntries}
+              archived
+              onCopy={bridge.copyText ? (t) => bridge.copyText!(t) : undefined}
+              onArchive={archiveJob}
+            />
+          ) : (
+            <HistoryList
+              entries={history}
+              onCopy={bridge.copyText ? (t) => bridge.copyText!(t) : undefined}
+              onArchive={archiveJob}
+            />
+          )}
         </div>
 
         <StorageCard freeBytes={health?.storage.freeBytes ?? null} jobStorage={activeJob?.storage ?? null} />

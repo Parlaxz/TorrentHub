@@ -15,6 +15,7 @@ export {
 export { VIKING_RELAY_TAG } from "./gateways.ts";
 export type {
   AddTorrentOptions,
+  DirectDownloadGateway,
   JobRepository,
   PackagingGateway,
   PreflightRequest,
@@ -29,6 +30,7 @@ export type {
   ZipRequest,
 } from "./gateways.ts";
 export type {
+  CleanupPolicy,
   DownloadTelemetry,
   FailureKind,
   IntakeSource,

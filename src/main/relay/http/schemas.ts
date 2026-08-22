@@ -33,6 +33,14 @@ export const jobCreateSchema = z.strictObject({
   selection: z.array(z.number().int().min(0).max(1_000_000)).max(10_000).nullish(),
   zipRequired: z.boolean().nullish(),
   idempotencyKey: idempotencyKeySchema,
+  cleanup: z
+    .strictObject({
+      deleteTorrent: z.boolean(),
+      deleteFiles: z.boolean(),
+      deleteZip: z.boolean(),
+    })
+    .partial()
+    .nullish(),
 });
 
 export const pairRequestSchema = z.strictObject({

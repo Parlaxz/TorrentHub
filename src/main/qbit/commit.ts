@@ -40,6 +40,7 @@ import type {
   CommitSelectionResult,
   JobRecord,
   QbitTorrentFile,
+  QbitTorrentInfo,
 } from './types';
 
 export interface CommitOptions {
@@ -90,11 +91,29 @@ export async function commitTorrentSelection(
   const hash = record.infoHash;
 
   // ---- ensure the torrent exists and is ours ----------------------------
-  let info = (await client.getTorrents([hash]))[0];
+  let info: QbitTorrentInfo | undefined = (await client.getTorrents([hash]))[0];
 
   if (info) {
-    assertCommitOwnership(info, tag);
-  } else {
+    try {
+      assertCommitOwnership(info, tag);
+    } catch (err) {
+      // A previous FAILED attempt leaves its vr_job_<oldJob> tag behind.
+      // When that leftover is inactive (not actively transferring), remove
+      // it and re-add fresh instead of refusing the retry.
+      const otherTag =
+        err instanceof DuplicateUnmanagedTorrentError
+          ? (err.details?.otherJobTag as string | undefined)
+          : undefined;
+      if (otherTag && isInactiveTorrentState(info.state)) {
+        await client.deleteTorrents([hash], false);
+        info = undefined;
+      } else {
+        throw err;
+      }
+    }
+  }
+
+  if (!info) {
     await addFreshStopped(
       client,
       record.source,
@@ -212,6 +231,24 @@ function normalizeIndexes(indexes: number[]): number[] {
     seen.add(value);
   }
   return [...seen].sort((a, b) => a - b);
+}
+
+/**
+ * Torrent states safe to auto-remove on a retry: nothing is actively
+ * transferring, so deleting the leftover cannot break a live download.
+ */
+const REMOVABLE_STATES = new Set([
+  'stopped',
+  'stoppedUP',
+  'stoppedDL',
+  'pausedUP',
+  'pausedDL',
+  'errored',
+  'missingFiles',
+]);
+
+function isInactiveTorrentState(state: string | undefined): boolean {
+  return typeof state === 'string' && REMOVABLE_STATES.has(state);
 }
 
 /**

@@ -164,6 +164,7 @@ export class ClientRelayService {
   async confirmSelection(
     jobId: string,
     fileIndexes: number[],
+    cleanup?: { deleteTorrent?: boolean; deleteFiles?: boolean; deleteZip?: boolean },
   ): Promise<BridgeResult<StoragePreflight>> {
     const indexes = [...new Set(fileIndexes)].sort((a, b) => a - b)
     if (indexes.length === 0) {
@@ -174,6 +175,7 @@ export class ClientRelayService {
         intakeId: jobId,
         selection: indexes,
         idempotencyKey: startKey(jobId),
+        ...(cleanup ? { cleanup } : {}),
       })
       const preflight = job.storagePreflight ?? job.preflight ?? null
       if (!preflight) {

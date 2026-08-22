@@ -189,6 +189,9 @@ export interface HistoryEntry {
   url?: string | null;
   finishedAt: string;
   errorKind?: string | null;
+  /** Human-readable failure reason; present on failed/interrupted jobs. */
+  errorMessage?: string | null;
+  archived?: boolean;
 }
 
 /* --------------------------------- settings --------------------------------- */
@@ -204,6 +207,10 @@ export interface AppSettings {
   vikingUserHashSet: boolean;
   startWithWindows: boolean;
   preventSleepDuringTransfers: boolean;
+  /** Post-upload cleanup defaults (per-job overrides exist at Start time). */
+  cleanupDeleteTorrent: boolean;
+  cleanupDeleteFiles: boolean;
+  cleanupDeleteZip: boolean;
 }
 
 export type SettingsPatch = Partial<
@@ -215,6 +222,9 @@ export type SettingsPatch = Partial<
     | "qbitWebUiUrl"
     | "startWithWindows"
     | "preventSleepDuringTransfers"
+    | "cleanupDeleteTorrent"
+    | "cleanupDeleteFiles"
+    | "cleanupDeleteZip"
   >
 >;
 
@@ -276,6 +286,10 @@ export interface VikingRelayServerBridge {
   /* jobs */
   getActiveJob(): Promise<TransferSnapshot | null>;
   getHistory(limit: number): Promise<HistoryEntry[]>;
+  getArchivedHistory(limit: number): Promise<HistoryEntry[]>;
+  setJobArchived?(jobId: string, archived: boolean): Promise<void>;
+  /** Copies text to the clipboard from the main process. */
+  copyText?(text: string): Promise<boolean>;
   dismissInterruptedJob?(jobId: string): Promise<void>;
   cleanJobData?(jobId: string): Promise<void>;
   openQBittorrentWebUi?(): Promise<void>;

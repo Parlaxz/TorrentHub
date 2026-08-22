@@ -199,6 +199,7 @@ if (!gotLock) {
       secrets,
       log,
       updater,
+      logsDir: paths.logsDir,
       versions: {
         app: app.getVersion(),
         electron: process.versions.electron ?? 'unknown',

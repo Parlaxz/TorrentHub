@@ -20,6 +20,7 @@ import {
   FakeTorrentGateway,
   FakeVikingGateway,
   FakeWorkspaceGateway,
+    FakeDirectDownloadGateway,
   MemoryJobRepository,
   fakeMetadata,
 } from '../jobs/fakes.ts';
@@ -48,6 +49,7 @@ async function setup(
     packaging: new FakePackagingGateway([{ sizeBytes: 2100 }]),
     storage,
     workspace: new FakeWorkspaceGateway(),
+      direct: new FakeDirectDownloadGateway(),
     repository: new MemoryJobRepository(),
   };
   const root = await mkdtemp(path.join(tmpdir(), 'vr-jobservice-'));
@@ -206,3 +208,5 @@ describe('integration: A5 -> A6 job service', () => {
     await world.engine.whenIdle().catch(() => undefined);
   });
 });
+
+

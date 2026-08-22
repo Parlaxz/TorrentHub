@@ -30,6 +30,12 @@ export const AppSettingsSchema = z.object({
   startWithWindows: z.boolean().default(false),
   /** Block system sleep while a transfer is active (powerSaveBlocker). */
   preventSleepDuringTransfers: z.boolean().default(true),
+  /** After a successful upload: remove the torrent from qBittorrent. */
+  cleanupDeleteTorrent: z.boolean().default(true),
+  /** After a successful upload: delete downloaded files from disk (needs torrent removal to matter). */
+  cleanupDeleteFiles: z.boolean().default(true),
+  /** After a successful upload: delete the temporary ZIP archive. */
+  cleanupDeleteZip: z.boolean().default(true),
   /**
    * Client Mode: saved Server PC Radmin IPv4 + relay port. Non-secret
    * settings; the bearer token lives only in the safeStorage secret store.
@@ -53,6 +59,9 @@ export const AppSettingsPatchSchema = z.object({
   radminInterfaceId: z.string().min(1).nullable().optional(),
   startWithWindows: z.boolean().optional(),
   preventSleepDuringTransfers: z.boolean().optional(),
+  cleanupDeleteTorrent: z.boolean().optional(),
+  cleanupDeleteFiles: z.boolean().optional(),
+  cleanupDeleteZip: z.boolean().optional(),
   clientServerHost: z.string().min(1).nullable().optional(),
   clientServerPort: z.number().int().min(1).max(65535).optional()
 })
@@ -66,6 +75,9 @@ export const DEFAULT_SETTINGS: AppSettings = {
   radminInterfaceId: null,
   startWithWindows: false,
   preventSleepDuringTransfers: true,
+  cleanupDeleteTorrent: true,
+  cleanupDeleteFiles: true,
+  cleanupDeleteZip: true,
   clientServerHost: null,
   clientServerPort: 47821
 }

@@ -21,6 +21,7 @@ import {
   FakeTorrentGateway,
   FakeVikingGateway,
   FakeWorkspaceGateway,
+    FakeDirectDownloadGateway,
   MemoryJobRepository,
   fakeMetadata,
 } from '../jobs/fakes.ts';
@@ -82,6 +83,7 @@ describe('integration: canonical disk preflight', () => {
       packaging: new FakePackagingGateway(),
       storage: gateway,
       workspace: new FakeWorkspaceGateway(),
+      direct: new FakeDirectDownloadGateway(),
       repository: new MemoryJobRepository(),
     };
     const engine = new JobEngine(
@@ -127,3 +129,5 @@ describe('integration: canonical disk preflight', () => {
     assert.equal(okView.zipReservationBytes, null);
   });
 });
+
+

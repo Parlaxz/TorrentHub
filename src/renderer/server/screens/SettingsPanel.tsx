@@ -241,6 +241,36 @@ export function SettingsPanel({
           onChange={(next) => void saveSettings({ preventSleepDuringTransfers: next })}
         />
 
+        <div data-testid="cleanup-settings">
+          <h3 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+            Auto-delete after upload
+          </h3>
+          <p className="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">
+            Defaults for every job. Clients can override these per transfer.
+          </p>
+          <div className="mt-2 space-y-2">
+            <Toggle
+              label="Delete torrent from qBittorrent"
+              checked={settings.cleanupDeleteTorrent}
+              onChange={(next) => void saveSettings({ cleanupDeleteTorrent: next })}
+              data-testid="cleanup-delete-torrent"
+            />
+            <Toggle
+              label="Delete downloaded files"
+              description="Removes the downloaded payload from disk."
+              checked={settings.cleanupDeleteFiles}
+              onChange={(next) => void saveSettings({ cleanupDeleteFiles: next })}
+              data-testid="cleanup-delete-files"
+            />
+            <Toggle
+              label="Delete temporary ZIP"
+              checked={settings.cleanupDeleteZip}
+              onChange={(next) => void saveSettings({ cleanupDeleteZip: next })}
+              data-testid="cleanup-delete-zip"
+            />
+          </div>
+        </div>
+
         <p className="text-xs text-zinc-500 dark:text-zinc-500">
           Mode: Server. Switch to Client mode from the tray menu.
         </p>

@@ -17,7 +17,8 @@ export const IpcChannels = {
   secretDelete: 'secrets:delete',
   updatesGetState: 'updates:getState',
   updatesCheck: 'updates:check',
-  updatesInstall: 'updates:install'
+  updatesInstall: 'updates:install',
+  openLogsFolder: 'app:openLogsFolder'
 } as const
 
 // ---------------------------------------------------------------------------
@@ -86,6 +87,8 @@ export interface VikingRelayBridge {
   checkForUpdates(): Promise<UpdateState>
   /** Applies a downloaded update by restarting the app. */
   installUpdate(): Promise<UpdateState>
+  /** Opens the logs folder in the OS file explorer. */
+  openLogsFolder(): Promise<boolean>
   /** Main-process log mirror (warn/error) so failures reach the DevTools console. */
   onLog(cb: (entry: { level: 'warn' | 'error' | 'info'; msg: string }) => void): () => void
 }
@@ -110,6 +113,7 @@ export interface IpcHandlers {
   [IpcChannels.updatesGetState]: () => Promise<UpdateState>
   [IpcChannels.updatesCheck]: () => Promise<UpdateState>
   [IpcChannels.updatesInstall]: () => Promise<UpdateState>
+  [IpcChannels.openLogsFolder]: () => Promise<boolean>
 }
 
 export { AppModeSchema, AppSettingsPatchSchema, SecretKeySchema, SecretValueSchema }

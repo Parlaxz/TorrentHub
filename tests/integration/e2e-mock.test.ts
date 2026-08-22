@@ -19,6 +19,7 @@ import { QbitTorrentService } from '../../src/main/qbit/service.ts';
 import { QbitTorrentGateway } from '../../src/main/integration/qbit-gateway.ts';
 import { PackagingGatewayAdapter } from '../../src/main/integration/packaging-gateway.ts';
 import { StoragePolicyGateway } from '../../src/main/integration/storage-gateway.ts';
+import { HttpDirectDownloadGateway } from '../../src/main/integration/direct-gateway.ts';
 import { VikingClient } from '../../src/main/viking/index.ts';
 import { VikingGatewayAdapter } from '../../src/main/integration/viking-gateway.ts';
 import { createMockViking } from '../viking/helpers/mock-server.ts';
@@ -110,6 +111,7 @@ describe('integration: full mock E2E pipeline', () => {
     const engine = new JobEngine(
       {
         torrent: new QbitTorrentGateway(() => qbit),
+        direct: new HttpDirectDownloadGateway(),
         viking: new VikingGatewayAdapter(() => vikingClient),
         packaging: new PackagingGatewayAdapter(),
         storage: new StoragePolicyGateway(),

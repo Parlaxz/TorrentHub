@@ -67,6 +67,7 @@ export class EngineJobService implements JobService {
         input.intakeId,
         selection,
         input.idempotencyKey ?? null,
+        input.cleanup ?? null,
       );
       return toPublicJob(record);
     } catch (error) {

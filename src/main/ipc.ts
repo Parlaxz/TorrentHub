@@ -1,4 +1,4 @@
-import { ipcMain } from 'electron'
+import { ipcMain, shell } from 'electron'
 import type { AppState, IpcHandlers, UpdateState } from '@shared/ipc'
 import { AppModeSchema, IpcChannels, SecretKeySchema, SecretValueSchema } from '@shared/ipc'
 import { AppSettingsPatchSchema } from '@shared/settings'
@@ -13,6 +13,7 @@ interface IpcContext {
   log: Logger
   versions: AppState['versions']
   updater: AppUpdater
+  logsDir: string
 }
 
 function badRequest(message: string): Error {
@@ -63,7 +64,12 @@ export function registerIpcHandlers(ctx: IpcContext): void {
 
     [IpcChannels.updatesGetState]: async (): Promise<UpdateState> => ctx.updater.getState(),
     [IpcChannels.updatesCheck]: async (): Promise<UpdateState> => ctx.updater.check(),
-    [IpcChannels.updatesInstall]: async (): Promise<UpdateState> => ctx.updater.install()
+    [IpcChannels.updatesInstall]: async (): Promise<UpdateState> => ctx.updater.install(),
+    [IpcChannels.openLogsFolder]: async (): Promise<boolean> => {
+      const result = await shell.openPath(ctx.logsDir)
+      if (result) ctx.log.warn({ err: result }, 'openLogsFolder failed')
+      return !result
+    }
   }
 
   ipcMain.handle(IpcChannels.appGetState, () => handlers[IpcChannels.appGetState]())
@@ -96,4 +102,5 @@ export function registerIpcHandlers(ctx: IpcContext): void {
   ipcMain.handle(IpcChannels.updatesGetState, () => handlers[IpcChannels.updatesGetState]())
   ipcMain.handle(IpcChannels.updatesCheck, () => handlers[IpcChannels.updatesCheck]())
   ipcMain.handle(IpcChannels.updatesInstall, () => handlers[IpcChannels.updatesInstall]())
+  ipcMain.handle(IpcChannels.openLogsFolder, () => handlers[IpcChannels.openLogsFolder]())
 }

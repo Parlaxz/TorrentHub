@@ -29,6 +29,7 @@ import { EngineJobService } from '../integration/job-service';
 import { PackagingGatewayAdapter } from '../integration/packaging-gateway';
 import { QbitTorrentGateway } from '../integration/qbit-gateway';
 import { StoragePolicyGateway } from '../integration/storage-gateway';
+import { HttpDirectDownloadGateway } from '../integration/direct-gateway';
 import { VikingGatewayAdapter } from '../integration/viking-gateway';
 import { SafeStorageTokenPersistence } from './auth-persistence';
 
@@ -108,16 +109,22 @@ export function buildEngineGraph(
   const storage = new StoragePolicyGateway({
     warn: (obj, msg) => host.log.warn(obj, msg),
   });
+  const direct = new HttpDirectDownloadGateway();
   const workspace = new FsWorkspaceGateway(resolveJobsRoot(host));
   const repository = new JsonJobRepository({
     filePath: join(host.userDataDir, 'data', 'job-history.json'),
   });
 
   const engine = new JobEngine(
-    { torrent, viking, packaging, storage, workspace, repository },
+    { torrent, direct, viking, packaging, storage, workspace, repository },
     resolveConfig({
       jobsRoot: resolveJobsRoot(host),
       historyFilePath: join(host.userDataDir, 'data', 'job-history.json'),
+      cleanupDefaults: {
+        deleteTorrent: host.settings.get().cleanupDeleteTorrent,
+        deleteFiles: host.settings.get().cleanupDeleteFiles,
+        deleteZip: host.settings.get().cleanupDeleteZip,
+      },
       logger: {
         info: (obj, msg) => host.log.info(obj, msg),
         warn: (obj, msg) => host.log.warn(obj, msg),

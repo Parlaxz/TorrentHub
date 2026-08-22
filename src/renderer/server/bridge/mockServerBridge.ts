@@ -131,6 +131,9 @@ export class MockServerBridge implements VikingRelayServerBridge {
       vikingUserHashSet: false,
       startWithWindows: false,
       preventSleepDuringTransfers: true,
+      cleanupDeleteTorrent: true,
+      cleanupDeleteFiles: true,
+      cleanupDeleteZip: true,
     };
     this.job = scenario.job !== undefined ? scenario.job : null;
     this.history = scenario.history ?? [];
@@ -271,6 +274,16 @@ export class MockServerBridge implements VikingRelayServerBridge {
 
   async getHistory(limit: number): Promise<HistoryEntry[]> {
     return this.history.slice(0, limit);
+  }
+
+  async getArchivedHistory(_limit: number): Promise<HistoryEntry[]> {
+    return [];
+  }
+
+  async setJobArchived(_jobId: string, _archived: boolean): Promise<void> {}
+
+  async copyText(text: string): Promise<boolean> {
+    return text.length > 0;
   }
 
   async dismissInterruptedJob(jobId: string): Promise<void> {

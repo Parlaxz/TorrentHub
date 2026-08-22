@@ -61,7 +61,8 @@ export function initialStageMap(): StageMap {
 /** Where the torrent source came from. */
 export type IntakeSource =
   | { kind: "magnet"; value: string }
-  | { kind: "url"; value: string };
+  | { kind: "url"; value: string }
+  | { kind: "direct"; value: string };
 
 export interface TorrentFileEntry {
   /** qBittorrent file index inside the torrent. */
@@ -153,6 +154,13 @@ export interface JobResult {
   verified?: boolean | null;
 }
 
+/** What gets cleaned up after a successful upload (global defaults + per-job overrides). */
+export interface CleanupPolicy {
+  deleteTorrent: boolean;
+  deleteFiles: boolean;
+  deleteZip: boolean;
+}
+
 /** Full persisted/exposed job record. Kept intentionally small (JSON-backed). */
 export interface JobRecord {
   id: string;
@@ -183,6 +191,9 @@ export interface JobRecord {
   /** Authoritative pre-Start storage verdict (set at commit time). */
   preflight?: PreflightView | null;
 
+  /** Resolved cleanup policy (defaults + per-job overrides), set at commit time. */
+  cleanupPolicy?: CleanupPolicy | null;
+
   result?: JobResult | null;
   error?: JobError | null;
   /** Last known stage when a previous-session job was marked interrupted. */
@@ -190,6 +201,9 @@ export interface JobRecord {
 
   /** User acknowledged the interrupted-job banner (UI persistence only). */
   dismissed?: boolean | null;
+
+  /** Archived jobs are hidden from the default history view. */
+  archived?: boolean;
 
   /** Engine session epoch that created/last touched this job. Used by the startup sweep. */
   sessionEpoch?: string | null;

@@ -8,7 +8,7 @@
  * nonterminal jobs from previous sessions as 'interrupted' and does NOT
  * inspect qBittorrent or resume any stage.
  */
-import type { FailureKind, IntakeSource, JobRecord, StageName, TorrentMetadataInfo } from "./types.ts";
+import type { CleanupPolicy, FailureKind, IntakeSource, JobRecord, StageName, TorrentMetadataInfo } from "./types.ts";
 import { STAGE_NAMES, initialStageMap, isTerminalJobState } from "./types.ts";
 import {
   InsufficientSpaceError,
@@ -17,6 +17,7 @@ import {
   JobNotFoundError,
 } from "./errors.ts";
 import type {
+  DirectDownloadGateway,
   JobRepository,
   PackagingGateway,
   StorageGateway,
@@ -30,6 +31,7 @@ import { TransferPipeline, type CancelOptions, type PipelineDeps } from "./pipel
 
 export interface JobEngineDeps {
   torrent: TorrentGateway;
+  direct: DirectDownloadGateway;
   viking: VikingGateway;
   packaging: PackagingGateway;
   storage: StorageGateway;
@@ -127,6 +129,31 @@ export class JobEngine {
       error: null,
       sessionEpoch: this.#epoch,
     };
+
+    // Direct downloads need no torrent metadata: probe the URL for a
+    // filename + size and go straight to file selection.
+    if (source.kind === "direct") {
+      record.stages.metadata = "active";
+      await this.#save(record);
+      try {
+        const probe = await this.#deps.direct.probe(source.value);
+        record.metadata = {
+          name: probe.filename,
+          files: [{ index: 0, path: probe.filename, sizeBytes: probe.sizeBytes }],
+          totalSizeBytes: probe.sizeBytes,
+        };
+        record.stages.metadata = "complete";
+        record.stages.selection = "waiting";
+        record.state = "awaiting_selection";
+      } catch (error) {
+        record.stages.metadata = "failed";
+        record.state = "failed";
+        record.error = { kind: "metadata", message: `direct link probe failed: ${String(error)}` };
+      }
+      await this.#save(record);
+      return record;
+    }
+
     record.stages.metadata = "active";
     await this.#save(record);
 
@@ -163,6 +190,7 @@ export class JobEngine {
     jobId: string,
     selectedIndexes: number[],
     idempotencyKey?: string | null,
+    cleanupOverrides?: Partial<CleanupPolicy> | null,
   ): Promise<JobRecord> {
     const record = await this.#require(jobId);
     const key = normalizeIdempotencyKey(idempotencyKey);
@@ -201,6 +229,12 @@ export class JobEngine {
     record.selection = indexes;
     record.selectedBytes = selectedBytes;
     record.zipRequired = zipRequired;
+    record.cleanupPolicy = {
+      deleteTorrent:
+        cleanupOverrides?.deleteTorrent ?? this.#config.cleanupDefaults.deleteTorrent,
+      deleteFiles: cleanupOverrides?.deleteFiles ?? this.#config.cleanupDefaults.deleteFiles,
+      deleteZip: cleanupOverrides?.deleteZip ?? this.#config.cleanupDefaults.deleteZip,
+    };
 
     // ---- disk preflight: reject Start if peak space is unsafe ----
     // The storage adapter applies the authoritative disk-space policy
@@ -292,8 +326,18 @@ export class JobEngine {
   // ------------------------------------------------------------ control
 
   /** Stage-aware cancellation. See TransferPipeline.cancel for semantics. */
-  async cancel(jobId: string, options: CancelOptions = {}): Promise<JobRecord> {
+  /** Archive/unarchive a terminal job (UI history filtering only). */
+  async setArchived(jobId: string, archived: boolean): Promise<JobRecord> {
     const record = await this.#require(jobId);
+    if (!isTerminalJobState(record.state)) {
+      throw new InvalidTransitionError("only terminal jobs can be archived");
+    }
+    record.archived = archived;
+    await this.#save(record);
+    return record;
+  }
+
+  async cancel(jobId: string, options: CancelOptions = {}): Promise<JobRecord> {    const record = await this.#require(jobId);
     if (isTerminalJobState(record.state)) return record;
 
     const live = this.#activePipeline;
@@ -453,6 +497,7 @@ export class JobEngine {
   #pipelineDeps(): PipelineDeps {
     return {
       torrent: this.#deps.torrent,
+      direct: this.#deps.direct,
       viking: this.#deps.viking,
       packaging: this.#deps.packaging,
       storage: this.#deps.storage,
@@ -478,9 +523,18 @@ function parseIntakeSource(input: string): IntakeSource {
   const trimmed = input.trim();
   if (trimmed.startsWith("magnet:")) return { kind: "magnet", value: trimmed };
   if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) {
-    return { kind: "url", value: trimmed };
+    // .torrent URLs go through qBittorrent; everything else is a DIRECT
+    // download fetched by the server itself (no torrent client involved).
+    let path = trimmed;
+    try {
+      path = new URL(trimmed).pathname;
+    } catch {
+      /* keep the raw value for the extension check */
+    }
+    if (/\.torrent$/i.test(path)) return { kind: "url", value: trimmed };
+    return { kind: "direct", value: trimmed };
   }
-  throw new JobEngineError("source must be a magnet link or http(s) torrent URL");
+  throw new JobEngineError("source must be a magnet link or http(s) URL");
 }
 
 function lastNonWaitingStage(stages: Record<StageName, string>): StageName | null {

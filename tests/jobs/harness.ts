@@ -1,6 +1,7 @@
 /** Test harness wiring JobEngine with fake gateways + event ordering log. */
 import { JobEngine, resolveConfig } from "../../src/main/jobs/index.ts";
 import type {
+  DirectDownloadGateway,
   JobRepository,
   StorageGateway,
   TorrentGateway,
@@ -8,6 +9,7 @@ import type {
   WorkspaceGateway,
 } from "../../src/main/jobs/index.ts";
 import {
+  FakeDirectDownloadGateway,
   FakePackagingGateway,
   FakeStorageGateway,
   FakeTorrentGateway,
@@ -89,11 +91,16 @@ export function makeHarness(options: HarnessOptions = {}): Harness {
     },
     join: (...parts) => workspace.join(...parts),
     pathExists: (target) => workspace.pathExists(target),
+    joinDownload: (downloadDir, filename) => workspace.joinDownload(downloadDir, filename),
+    statFile: (target) => workspace.statFile(target),
   };
+
+  const direct: DirectDownloadGateway = new FakeDirectDownloadGateway();
 
   const engine = new JobEngine(
     {
       torrent: trackedTorrent,
+      direct,
       viking: viking as VikingGateway,
       packaging: packaging,
       storage: storage as StorageGateway,

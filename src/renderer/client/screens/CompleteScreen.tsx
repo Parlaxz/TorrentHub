@@ -29,10 +29,19 @@ export function CompleteScreen({
           return;
         }
       } catch {
-        /* fall through to select-text */
+        /* fall through */
       }
     }
-    // No safe clipboard API exposed: select the text so the user can copy.
+    // Renderer-side fallback (works when the page has clipboard permission).
+    try {
+      await navigator.clipboard.writeText(url);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 2000);
+      return;
+    } catch {
+      /* fall through to select-text */
+    }
+    // Last resort: select the text so the user can copy manually.
     inputRef.current?.focus();
     inputRef.current?.select();
   };

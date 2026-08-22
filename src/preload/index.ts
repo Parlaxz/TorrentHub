@@ -23,6 +23,7 @@ const bridge: VikingRelayBridge = {
   getUpdateState: () => ipcRenderer.invoke(IpcChannels.updatesGetState),
   checkForUpdates: () => ipcRenderer.invoke(IpcChannels.updatesCheck),
   installUpdate: () => ipcRenderer.invoke(IpcChannels.updatesInstall),
+  openLogsFolder: () => ipcRenderer.invoke(IpcChannels.openLogsFolder),
   onLog: (cb: (entry: { level: 'warn' | 'error' | 'info'; msg: string }) => void) => {
     const listener = (_event: Electron.IpcRendererEvent, entry: { level: 'warn' | 'error' | 'info'; msg: string }): void =>
       cb(entry)
@@ -60,8 +61,8 @@ const clientBridge = {
   getDraft: (jobId: string) => ipcRenderer.invoke(ClientIpc.getDraft, jobId),
   cancelJob: (jobId: string) => ipcRenderer.invoke(ClientIpc.cancelJob, jobId),
 
-  confirmSelection: (jobId: string, fileIndexes: number[]) =>
-    ipcRenderer.invoke(ClientIpc.confirmSelection, jobId, fileIndexes),
+  confirmSelection: (jobId: string, fileIndexes: number[], cleanup?: { deleteTorrent?: boolean; deleteFiles?: boolean; deleteZip?: boolean }) =>
+    ipcRenderer.invoke(ClientIpc.confirmSelection, jobId, fileIndexes, cleanup),
   startJob: (jobId: string) => ipcRenderer.invoke(ClientIpc.startJob, jobId),
   getJob: (jobId: string) => ipcRenderer.invoke(ClientIpc.getJob, jobId),
   retryPackaging: (jobId: string) => ipcRenderer.invoke(ClientIpc.retryPackaging, jobId),
@@ -123,6 +124,10 @@ const serverBridge = {
 
   getActiveJob: () => ipcRenderer.invoke(ServerIpc.getActiveJob),
   getHistory: (limit: number) => ipcRenderer.invoke(ServerIpc.getHistory, limit),
+  getArchivedHistory: (limit: number) => ipcRenderer.invoke(ServerIpc.getArchivedHistory, limit),
+  setJobArchived: (jobId: string, archived: boolean) =>
+    ipcRenderer.invoke(ServerIpc.setJobArchived, jobId, archived),
+  copyText: (text: string) => ipcRenderer.invoke(ServerIpc.copyText, text),
   dismissInterruptedJob: (jobId: string) =>
     ipcRenderer.invoke(ServerIpc.dismissInterruptedJob, jobId),
   cleanJobData: (jobId: string) => ipcRenderer.invoke(ServerIpc.cleanJobData, jobId),

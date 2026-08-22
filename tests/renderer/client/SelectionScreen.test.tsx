@@ -65,7 +65,11 @@ describe("SelectionScreen", () => {
     fireEvent.click(screen.getByRole("button", { name: /continue/i }));
 
     await waitFor(() =>
-      expect(bridge.confirmSelection).toHaveBeenCalledWith("j9", [0, 1]),
+      expect(bridge.confirmSelection).toHaveBeenCalledWith("j9", [0, 1], {
+        deleteTorrent: true,
+        deleteFiles: true,
+        deleteZip: true,
+      }),
     );
 
     const start = await screen.findByRole("button", { name: "Start" });

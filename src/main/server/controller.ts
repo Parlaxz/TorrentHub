@@ -17,7 +17,7 @@ import { mkdir, writeFile, unlink } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
-import { app, dialog, powerSaveBlocker, shell } from 'electron';
+import { app, clipboard, dialog, powerSaveBlocker, shell } from 'electron';
 
 import type {
   AppSettings as ServerSettingsView,
@@ -354,12 +354,26 @@ export class ServerController implements VikingRelayServerBridge {
     return this.findActiveJob();
   }
 
-  async getHistory(limit: number): Promise<HistoryEntry[]> {
+  async getHistory(limit: number, archivedOnly = false): Promise<HistoryEntry[]> {
     const jobs = await this.allJobs();
     return jobs
       .filter((j) => isTerminalJobState(j.state))
+      .filter((j) => (archivedOnly ? j.archived === true : j.archived !== true))
       .slice(0, Math.max(1, Math.min(500, limit)))
       .map(toHistoryEntry);
+  }
+
+  async setJobArchived(jobId: string, archived: boolean): Promise<void> {
+    await this.ensureGraph().engine.setArchived(jobId, archived);
+  }
+
+  async getArchivedHistory(limit: number): Promise<HistoryEntry[]> {
+    return this.getHistory(limit, true);
+  }
+
+  async copyText(text: string): Promise<boolean> {
+    clipboard.writeText(String(text ?? ''));
+    return true;
   }
 
   async dismissInterruptedJob(jobId: string): Promise<void> {
@@ -400,6 +414,9 @@ export class ServerController implements VikingRelayServerBridge {
     if (patch.preventSleepDuringTransfers !== undefined) {
       mapped.preventSleepDuringTransfers = patch.preventSleepDuringTransfers;
     }
+    if (patch.cleanupDeleteTorrent !== undefined) mapped.cleanupDeleteTorrent = patch.cleanupDeleteTorrent;
+    if (patch.cleanupDeleteFiles !== undefined) mapped.cleanupDeleteFiles = patch.cleanupDeleteFiles;
+    if (patch.cleanupDeleteZip !== undefined) mapped.cleanupDeleteZip = patch.cleanupDeleteZip;
     this.#host.settings.update(mapped);
 
     const next = this.#host.settings.get();
@@ -771,6 +788,9 @@ function settingsView(host: CompositionHost): ServerSettingsView {
     vikingUserHashSet: host.secrets.get(SECRET_VIKING_USER_HASH) !== null,
     startWithWindows: s.startWithWindows,
     preventSleepDuringTransfers: s.preventSleepDuringTransfers,
+    cleanupDeleteTorrent: s.cleanupDeleteTorrent,
+    cleanupDeleteFiles: s.cleanupDeleteFiles,
+    cleanupDeleteZip: s.cleanupDeleteZip,
   };
 }
 
@@ -798,10 +818,12 @@ function toHistoryEntry(record: JobRecord): HistoryEntry {
   return {
     id: record.id,
     name: record.metadata?.name ?? record.source.value,
-    finalState: record.state as HistoryEntry['finalState'],
+    finalState: record.state as HistoryEntry["finalState"],
     url: record.result?.url ?? null,
     finishedAt: record.updatedAt,
     errorKind: record.error?.kind ?? null,
+    errorMessage: record.error?.message ?? null,
+    archived: record.archived === true,
   };
 }
 

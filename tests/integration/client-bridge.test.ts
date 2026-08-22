@@ -23,6 +23,7 @@ import {
   FakeTorrentGateway,
   FakeVikingGateway,
   FakeWorkspaceGateway,
+    FakeDirectDownloadGateway,
   MemoryJobRepository,
   fakeMetadata,
 } from '../jobs/fakes.ts';
@@ -58,6 +59,7 @@ describe('integration: client bridge over a real relay', () => {
       packaging: new FakePackagingGateway([{ sizeBytes: 2100 }]),
       storage: new FakeStorageGateway([Number.MAX_SAFE_INTEGER]),
       workspace: new FakeWorkspaceGateway(),
+      direct: new FakeDirectDownloadGateway(),
       repository: new MemoryJobRepository(),
     };
     const root = await mkdtemp(path.join(tmpdir(), 'vr-clientbridge-'));
@@ -148,3 +150,5 @@ describe('integration: client bridge over a real relay', () => {
     }
   });
 });
+
+

@@ -15,6 +15,7 @@ import type {
 } from "./types.ts";
 import { InvalidTransitionError } from "./errors.ts";
 import type {
+  DirectDownloadGateway,
   PackageEntry,
   PackagingGateway,
   StorageGateway,
@@ -31,8 +32,20 @@ import { computeStorageView } from "./storage.ts";
 /** Consecutive poll errors tolerated before the download is declared failed. */
 const MAX_CONSECUTIVE_POLL_ERRORS = 10;
 
+function extFromUrl(url: string): string {
+  try {
+    const name = new URL(url).pathname.split("/").pop() ?? "";
+    const dot = name.lastIndexOf(".");
+    if (dot > 0) return name.slice(dot).slice(0, 12);
+  } catch {
+    /* ignore */
+  }
+  return ".bin";
+}
+
 export interface PipelineDeps {
   torrent: TorrentGateway;
+  direct: DirectDownloadGateway;
   viking: VikingGateway;
   packaging: PackagingGateway;
   storage: StorageGateway;
@@ -214,6 +227,12 @@ export class TransferPipeline {
     record.stages.download = "active";
     await this.#save();
 
+    // ---- direct (non-torrent) URL: stream the payload ourselves ----
+    if (record.source.kind === "direct") {
+      await this.#runDirectDownload();
+      return;
+    }
+
     const handle = await torrent.addTorrent(record.source, {
       selectedIndexes: record.selection!,
       outputDir: record.downloadDir!,
@@ -316,6 +335,64 @@ export class TransferPipeline {
       record.directSourcePath = byIndex.get(record.selection![0])!;
       record.stages.packaging = "skipped";
     }
+    await this.#save();
+  }
+
+  /** Non-torrent URL: stream the file straight into the job's download dir. */
+  async #runDirectDownload(): Promise<void> {
+    const { record } = this;
+    const filename =
+      record.metadata?.files[0]?.path ?? `download-${record.id}${extFromUrl(record.source.value)}`;
+    const destPath = await this.#deps.workspace.joinDownload(record.downloadDir!, filename);
+    let lastSave = 0;
+
+    try {
+      await this.#deps.direct.fetchTo(record.source.value, destPath, (downloaded, total) => {
+        record.telemetry = {
+          progressPct: total ? Math.min(100, Math.round((downloaded / total) * 100)) : 0,
+          downloadedBytes: downloaded,
+          totalSelectedBytes: total ?? record.selectedBytes ?? 0,
+          speedBps: 0,
+          etaSeconds: null,
+          seeds: 0,
+          peers: 0,
+          selectedComplete: false,
+          at: Date.now(),
+        };
+        // Throttle persistence to ~1/s like the torrent poller.
+        if (Date.now() - lastSave > 1000) {
+          lastSave = Date.now();
+          void this.#save();
+        }
+      });
+    } catch (error) {
+      await this.#fail("download", `direct download failed: ${String(error)}`);
+      return;
+    }
+
+    if (this.#cancelRequested) {
+      await this.#applyCancelCleanup();
+      await this.#finishCancel();
+      return;
+    }
+
+    const size = (await this.#deps.workspace.statFile(destPath)).sizeBytes;
+    record.selectedBytes = size;
+    record.telemetry = {
+      progressPct: 100,
+      downloadedBytes: size,
+      totalSelectedBytes: size,
+      speedBps: 0,
+      etaSeconds: null,
+      seeds: 0,
+      peers: 0,
+      selectedComplete: true,
+      at: Date.now(),
+    };
+    record.stages.download = "complete";
+    record.completedFiles = [{ index: 0, absolutePath: destPath }];
+    record.directSourcePath = destPath;
+    record.stages.packaging = "skipped"; // single payload — no ZIP
     await this.#save();
   }
 
@@ -559,12 +636,17 @@ export class TransferPipeline {
     await this.#save();
 
     try {
-      if (record.zipRequired && record.zipPath) {
+      const policy = record.cleanupPolicy ?? {
+        deleteTorrent: true,
+        deleteFiles: true,
+        deleteZip: true,
+      };
+      if (record.zipRequired && record.zipPath && policy.deleteZip) {
         await this.#deps.workspace.removePath(record.zipPath);
       }
       const handle = this.#ownedHandle();
-      if (handle) {
-        await this.#deps.torrent.deleteOwned(handle, true);
+      if (handle && policy.deleteTorrent) {
+        await this.#deps.torrent.deleteOwned(handle, policy.deleteFiles);
       }
       record.stages.cleanup = "complete";
     } catch (error) {

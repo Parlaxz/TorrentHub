@@ -3,6 +3,7 @@
  */
 import type {
   AddTorrentOptions,
+  DirectDownloadGateway,
   JobRepository,
   PackagingGateway,
   StorageGateway,
@@ -220,6 +221,14 @@ export class FakeWorkspaceGateway implements WorkspaceGateway {
     if (this.existing.size === 0) return !this.removed.includes(target);
     return this.existing.has(target) && !this.removed.includes(target);
   }
+
+  async joinDownload(downloadDir: string, filename: string): Promise<string> {
+    return joinPosix(downloadDir, filename);
+  }
+
+  async statFile(target: string): Promise<{ sizeBytes: number }> {
+    return { sizeBytes: this.existing.has(target) ? 1 : 0 };
+  }
 }
 
 /** Memory-backed repository with an upsert snapshot log for ordering asserts. */
@@ -255,6 +264,29 @@ export class MemoryJobRepository implements JobRepository {
 
 export function joinPosix(...parts: string[]): string {
   return parts.join("/").replace(/\/+/g, "/");
+}
+
+export class FakeDirectDownloadGateway implements DirectDownloadGateway {
+  failWith: Error | null = null;
+  readonly probes: string[] = [];
+  readonly fetches: Array<{ url: string; destPath: string }> = [];
+
+  async probe(url: string): Promise<{ filename: string; sizeBytes: number }> {
+    this.probes.push(url);
+    const name = url.split("/").pop() ?? "download.bin";
+    return { filename: name, sizeBytes: 1234 };
+  }
+
+  async fetchTo(
+    url: string,
+    destPath: string,
+    onProgress?: (downloaded: number, total: number | null) => void,
+  ): Promise<{ bytes: number }> {
+    if (this.failWith) throw this.failWith;
+    this.fetches.push({ url, destPath });
+    onProgress?.(1234, 1234);
+    return { bytes: 1234 };
+  }
 }
 
 export function makeTelemetry(sample: TelemetrySample): TelemetrySample {

@@ -24,6 +24,21 @@ import type {
 /** Ownership tag applied to every torrent the engine creates. */
 export const VIKING_RELAY_TAG = "viking-relay";
 
+/**
+ * Direct (non-torrent) HTTP(S) download adapter. Used when an intake URL
+ * does not point at a .torrent file — the server fetches the payload itself.
+ */
+export interface DirectDownloadGateway {
+  /** HEAD/GET probe for filename + size without downloading the body. */
+  probe(url: string): Promise<{ filename: string; sizeBytes: number }>;
+  /** Streams the payload to destPath, reporting progress. Resolves with bytes written. */
+  fetchTo(
+    url: string,
+    destPath: string,
+    onProgress?: (downloaded: number, total: number | null) => void,
+  ): Promise<{ bytes: number }>;
+}
+
 export interface AddTorrentOptions {
   /** Exact file indexes selected by the user; all others get priority 0. */
   selectedIndexes: number[];
@@ -219,4 +234,8 @@ export interface WorkspaceGateway {
   removePath(path: string): Promise<void>;
   join(...parts: string[]): string;
   pathExists(path: string): Promise<boolean>;
+  /** Resolves a filename inside the job's download dir (creating the dir). */
+  joinDownload(downloadDir: string, filename: string): Promise<string>;
+  /** Size of an existing file in bytes. */
+  statFile(path: string): Promise<{ sizeBytes: number }>;
 }

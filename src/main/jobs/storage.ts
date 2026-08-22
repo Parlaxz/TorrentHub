@@ -67,6 +67,16 @@ export class FsWorkspaceGateway implements WorkspaceGateway {
     await rm(target, { recursive: true, force: true });
   }
 
+  async joinDownload(downloadDir: string, filename: string): Promise<string> {
+    await mkdir(downloadDir, { recursive: true });
+    return path.join(downloadDir, filename);
+  }
+
+  async statFile(target: string): Promise<{ sizeBytes: number }> {
+    const info = await stat(target);
+    return { sizeBytes: info.size };
+  }
+
   join(...parts: string[]): string {
     return path.join(...parts);
   }

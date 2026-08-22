@@ -1,4 +1,4 @@
-import type { IntakeDraftView, IntakeSource, JobRecord } from "../jobs/types.js";
+import type { CleanupPolicy, IntakeDraftView, IntakeSource, JobRecord } from "../jobs/types.js";
 import { ServiceError } from "./http/errors.js";
 
 export interface CreateIntakeInput {
@@ -11,6 +11,8 @@ export interface CreateJobInput {
   selection?: number[] | null;
   zipRequired?: boolean | null;
   idempotencyKey?: string | null;
+  /** Per-job cleanup overrides; unset keys fall back to server defaults. */
+  cleanup?: Partial<CleanupPolicy> | null;
 }
 
 /**

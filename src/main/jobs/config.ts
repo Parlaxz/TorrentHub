@@ -20,6 +20,12 @@ export interface JobEngineConfig {
   historyLimit: number;
   /** Ownership tag handed to the torrent gateway. */
   ownershipTag: string;
+  /** Server-wide cleanup defaults; per-job overrides merge on top. */
+  cleanupDefaults: {
+    deleteTorrent: boolean;
+    deleteFiles: boolean;
+    deleteZip: boolean;
+  };
   /** Structured sink for engine diagnostics (preflight verdicts, etc.). */
   logger: {
     info: (obj: Record<string, unknown>, msg: string) => void;
@@ -41,6 +47,7 @@ export const DEFAULT_CONFIG: Omit<JobEngineConfig, "jobsRoot" | "historyFilePath
   lowHeadroomBytes: 512 * 1024 * 1024,
   historyLimit: 100,
   ownershipTag: VIKING_RELAY_TAG,
+  cleanupDefaults: { deleteTorrent: true, deleteFiles: true, deleteZip: true },
   logger: NOOP_LOGGER,
 };
 

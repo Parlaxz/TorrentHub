@@ -5,7 +5,7 @@
  * Every channel is a narrow, validated surface: no raw ipcRenderer, no
  * arbitrary fetch, no fs/shell access leaks through to the renderer.
  */
-import { BrowserWindow, ipcMain } from 'electron'
+import { BrowserWindow, clipboard, ipcMain } from 'electron'
 
 import { getLogger } from '../logger'
 import type { ServerController } from './controller'
@@ -69,9 +69,17 @@ export function registerServerBridgeIpc(controller: ServerController): void {
   )
   handle(ServerIpc.resetProfile, () => controller.resetProfile())
   handle(ServerIpc.getActiveJob, () => controller.getActiveJob())
-  handle(ServerIpc.getHistory, (limit: unknown) =>
-    controller.getHistory(Number(limit) || 20),
+  handle(ServerIpc.getHistory, (limit: unknown) => controller.getHistory(Number(limit) || 20))
+  handle(ServerIpc.getArchivedHistory, (limit: unknown) =>
+    controller.getHistory(Number(limit) || 50, true),
   )
+  handle(ServerIpc.setJobArchived, (jobId: unknown, archived: unknown) =>
+    controller.setJobArchived(String(jobId ?? ''), Boolean(archived)),
+  )
+  handle(ServerIpc.copyText, (text: unknown) => {
+    clipboard.writeText(String(text ?? ''))
+    return true
+  })
   handle(ServerIpc.dismissInterruptedJob, (jobId: unknown) =>
     controller.dismissInterruptedJob(String(jobId)),
   )
@@ -115,10 +123,13 @@ export function registerClientBridgeIpc(client: ClientRelayService): void {
   handle(ClientIpc.createIntake, (input: unknown) => client.createIntake(String(input ?? '')))
   handle(ClientIpc.getDraft, (jobId: unknown) => client.getDraft(String(jobId)))
   handle(ClientIpc.cancelJob, (jobId: unknown) => client.cancelJob(String(jobId)))
-  handle(ClientIpc.confirmSelection, (jobId: unknown, indexes: unknown) =>
+  handle(ClientIpc.confirmSelection, (jobId: unknown, indexes: unknown, cleanup: unknown) =>
     client.confirmSelection(
       String(jobId),
       Array.isArray(indexes) ? indexes.map((i) => Number(i)) : [],
+      typeof cleanup === 'object' && cleanup !== null
+        ? (cleanup as { deleteTorrent?: boolean; deleteFiles?: boolean; deleteZip?: boolean })
+        : undefined,
     ),
   )
   handle(ClientIpc.startJob, (jobId: unknown) => client.startJob(String(jobId)))

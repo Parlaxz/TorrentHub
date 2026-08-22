@@ -30,6 +30,8 @@ export function SelectionScreen({
   const [preflight, setPreflight] = useState<StoragePreflight | null>(null);
   const [confirming, setConfirming] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Per-job cleanup overrides (sent with the Start request).
+  const [cleanup, setCleanup] = useState({ deleteTorrent: true, deleteFiles: true, deleteZip: true });
 
   // Any selection change invalidates the previous server verdict.
   const handleSelectionChange = (next: Set<number>): void => {
@@ -60,7 +62,7 @@ export function SelectionScreen({
     setConfirming(true);
     try {
       const indexes = [...selected].sort((a, b) => a - b);
-      const res = await bridge.confirmSelection(draft.id, indexes);
+      const res = await bridge.confirmSelection(draft.id, indexes, cleanup);
       if (res.ok) {
         setPreflight(res.value);
       } else {
@@ -152,6 +154,36 @@ export function SelectionScreen({
               ⚠ {verdict?.text}
             </p>
           ) : null}
+        </Panel>
+      ) : null}
+
+      {/* Per-job cleanup overrides (apply after the upload completes) */}
+      {preflight ? (
+        <Panel className="mb-4">
+          <SectionTitle>After upload</SectionTitle>
+          <div className="space-y-1.5 text-sm text-zinc-700 dark:text-zinc-300" data-testid="cleanup-overrides">
+            {(
+              [
+                ["deleteTorrent", "Delete torrent from qBittorrent"],
+                ["deleteFiles", "Delete downloaded files from disk"],
+                ["deleteZip", "Delete temporary ZIP"],
+              ] as const
+            ).map(([key, label]) => (
+              <label key={key} className="flex cursor-pointer items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={cleanup[key]}
+                  onChange={(e) => setCleanup((c) => ({ ...c, [key]: e.target.checked }))}
+                  className="h-4 w-4"
+                  data-testid={`cleanup-${key}`}
+                />
+                {label}
+              </label>
+            ))}
+            <p className="text-xs text-zinc-500 dark:text-zinc-400">
+              Overrides the server's default cleanup settings for this job only.
+            </p>
+          </div>
         </Panel>
       ) : null}
 

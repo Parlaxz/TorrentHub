@@ -60,7 +60,11 @@ export interface VikingBridge {
    * Confirm selection using canonical qBittorrent FILE INDEXES.
    * Server responds with authoritative storage preflight.
    */
-  confirmSelection(jobId: string, fileIndexes: number[]): Promise<BridgeResult<StoragePreflight>>;
+  confirmSelection(
+    jobId: string,
+    fileIndexes: number[],
+    cleanup?: { deleteTorrent?: boolean; deleteFiles?: boolean; deleteZip?: boolean },
+  ): Promise<BridgeResult<StoragePreflight>>;
 
   startJob(jobId: string): Promise<void>;
   getJob(jobId: string): Promise<JobSnapshot>;

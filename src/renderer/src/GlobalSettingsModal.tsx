@@ -131,6 +131,14 @@ export function GlobalSettingsModal({
           Detailed logs: <span className="font-mono">%APPDATA%\Viking Relay\logs\</span> — errors
           also appear in this window's DevTools console.
         </p>
+        <button
+          type="button"
+          onClick={() => void window.vikingRelay.openLogsFolder()}
+          className="mt-2 rounded border border-neutral-700 px-3 py-1 text-xs hover:bg-neutral-800"
+          data-testid="open-logs-folder"
+        >
+          Open logs folder
+        </button>
       </div>
     </div>
   )
