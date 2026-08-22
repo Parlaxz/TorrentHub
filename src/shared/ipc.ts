@@ -14,7 +14,10 @@ export const IpcChannels = {
   settingsUpdate: 'app:updateSettings',
   secretSet: 'secrets:set',
   secretGet: 'secrets:get',
-  secretDelete: 'secrets:delete'
+  secretDelete: 'secrets:delete',
+  updatesGetState: 'updates:getState',
+  updatesCheck: 'updates:check',
+  updatesInstall: 'updates:install'
 } as const
 
 // ---------------------------------------------------------------------------
@@ -32,6 +35,29 @@ export const AppStateSchema = z.object({
   })
 })
 export type AppState = z.infer<typeof AppStateSchema>
+
+// ---------------------------------------------------------------------------
+// In-app updates
+// ---------------------------------------------------------------------------
+
+export type UpdatePhase =
+  | 'idle'
+  | 'checking'
+  | 'downloading'
+  | 'downloaded'
+  | 'not-available'
+  | 'error'
+
+export interface UpdateState {
+  phase: UpdatePhase
+  currentVersion: string
+  availableVersion: string | null
+  /** 0-100 while downloading; 100 once downloaded. */
+  progressPct: number | null
+  error: string | null
+  /** True in dev builds — the updater only runs when packaged. */
+  disabled: boolean
+}
 
 const SecretKeySchema = z
   .string()
@@ -55,6 +81,11 @@ export interface VikingRelayBridge {
   setMode(mode: AppMode): Promise<AppState>
   updateSettings(patch: AppSettingsPatch): Promise<AppSettings>
   secrets: SecretStoreBridge
+  getUpdateState(): Promise<UpdateState>
+  /** Triggers a check (and background download when one is available). */
+  checkForUpdates(): Promise<UpdateState>
+  /** Applies a downloaded update by restarting the app. */
+  installUpdate(): Promise<UpdateState>
 }
 
 declare global {
@@ -74,6 +105,9 @@ export interface IpcHandlers {
   [IpcChannels.secretSet]: (key: string, value: string) => Promise<boolean>
   [IpcChannels.secretGet]: (key: string) => Promise<string | null>
   [IpcChannels.secretDelete]: (key: string) => Promise<boolean>
+  [IpcChannels.updatesGetState]: () => Promise<UpdateState>
+  [IpcChannels.updatesCheck]: () => Promise<UpdateState>
+  [IpcChannels.updatesInstall]: () => Promise<UpdateState>
 }
 
 export { AppModeSchema, AppSettingsPatchSchema, SecretKeySchema, SecretValueSchema }

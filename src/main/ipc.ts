@@ -1,16 +1,18 @@
 import { ipcMain } from 'electron'
-import type { AppState, IpcHandlers } from '@shared/ipc'
+import type { AppState, IpcHandlers, UpdateState } from '@shared/ipc'
 import { AppModeSchema, IpcChannels, SecretKeySchema, SecretValueSchema } from '@shared/ipc'
 import { AppSettingsPatchSchema } from '@shared/settings'
 import type { Logger } from 'pino'
 import type { SecretStore } from './secrets'
 import type { AppSettingsStore } from './settings-store'
+import type { AppUpdater } from './updater'
 
 interface IpcContext {
   store: AppSettingsStore
   secrets: SecretStore
   log: Logger
   versions: AppState['versions']
+  updater: AppUpdater
 }
 
 function badRequest(message: string): Error {
@@ -57,7 +59,11 @@ export function registerIpcHandlers(ctx: IpcContext): void {
       const ok = ctx.secrets.delete(key)
       ctx.log.info({ key, ok }, 'secret deleted')
       return ok
-    }
+    },
+
+    [IpcChannels.updatesGetState]: async (): Promise<UpdateState> => ctx.updater.getState(),
+    [IpcChannels.updatesCheck]: async (): Promise<UpdateState> => ctx.updater.check(),
+    [IpcChannels.updatesInstall]: async (): Promise<UpdateState> => ctx.updater.install()
   }
 
   ipcMain.handle(IpcChannels.appGetState, () => handlers[IpcChannels.appGetState]())
@@ -87,4 +93,7 @@ export function registerIpcHandlers(ctx: IpcContext): void {
     if (!k.success) throw badRequest('invalid secret key')
     return handlers[IpcChannels.secretDelete](k.data)
   })
+  ipcMain.handle(IpcChannels.updatesGetState, () => handlers[IpcChannels.updatesGetState]())
+  ipcMain.handle(IpcChannels.updatesCheck, () => handlers[IpcChannels.updatesCheck]())
+  ipcMain.handle(IpcChannels.updatesInstall, () => handlers[IpcChannels.updatesInstall]())
 }

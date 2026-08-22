@@ -19,7 +19,10 @@ const bridge: VikingRelayBridge = {
     set: (key: string, value: string) => ipcRenderer.invoke(IpcChannels.secretSet, key, value),
     get: (key: string) => ipcRenderer.invoke(IpcChannels.secretGet, key),
     remove: (key: string) => ipcRenderer.invoke(IpcChannels.secretDelete, key)
-  }
+  },
+  getUpdateState: () => ipcRenderer.invoke(IpcChannels.updatesGetState),
+  checkForUpdates: () => ipcRenderer.invoke(IpcChannels.updatesCheck),
+  installUpdate: () => ipcRenderer.invoke(IpcChannels.updatesInstall)
 }
 
 contextBridge.exposeInMainWorld('vikingRelay', bridge)

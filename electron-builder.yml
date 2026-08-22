@@ -2,6 +2,12 @@ appId: com.vikingrelay.app
 productName: Viking Relay
 copyright: Copyright © 2026 Viking Relay
 
+# Auto-update feed (electron-updater reads latest.yml from the latest release).
+publish:
+  provider: github
+  owner: Parlaxz
+  repo: TorrentHub
+
 directories:
   output: dist
   buildResources: build
@@ -25,5 +31,7 @@ nsis:
   oneClick: false
   perMachine: false
   allowToChangeInstallationDirectory: true
-  artifactName: ${productName}-Setup-${version}.${ext}
+  # No spaces: GitHub rewrites asset filenames (spaces -> dots) and the
+  # auto-updater's latest.yml URL must match the stored asset name exactly.
+  artifactName: Viking-Relay-Setup-${version}.${ext}
   shortcutName: Viking Relay

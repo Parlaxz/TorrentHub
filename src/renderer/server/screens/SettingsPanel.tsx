@@ -5,6 +5,8 @@
 
 import { useEffect, useState } from "react";
 import type { PairedClientInfo, VikingRelayServerBridge } from "../bridge/types";
+import { getShellUpdateBridge } from "../bridge/shellBridge";
+import type { UpdateState } from "@shared/ipc";
 import { SECRET_MASK, secretDisplay } from "../domain/secrets";
 import { useRuntime } from "../state/RuntimeContext";
 import { Button, Modal, TextField, Toggle } from "../components/ui";
@@ -26,6 +28,55 @@ export function SettingsPanel({
   const [vikingHashInput, setVikingHashInput] = useState("");
   const [pairedClients, setPairedClients] = useState<PairedClientInfo[] | null>(null);
   const [resetting, setResetting] = useState(false);
+  const [updateState, setUpdateState] = useState<UpdateState | null>(null);
+  const [updateBusy, setUpdateBusy] = useState(false);
+
+  useEffect(() => {
+    if (!open) return;
+    const shell = getShellUpdateBridge();
+    if (!shell) return;
+    let cancelled = false;
+    shell
+      .getUpdateState()
+      .then((s) => {
+        if (!cancelled) setUpdateState(s);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [open]);
+
+  // Poll while an update check/download is in flight.
+  useEffect(() => {
+    const active =
+      updateState?.phase === "checking" || updateState?.phase === "downloading";
+    if (!open || !active) return;
+    const timer = setInterval(() => {
+      void getShellUpdateBridge()
+        ?.getUpdateState()
+        .then((s) => setUpdateState(s))
+        .catch(() => {});
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [open, updateState?.phase]);
+
+  const checkForUpdates = async (): Promise<void> => {
+    const shell = getShellUpdateBridge();
+    if (!shell) return;
+    setUpdateBusy(true);
+    try {
+      setUpdateState(await shell.checkForUpdates());
+    } finally {
+      setUpdateBusy(false);
+    }
+  };
+
+  const installUpdate = async (): Promise<void> => {
+    const shell = getShellUpdateBridge();
+    if (!shell) return;
+    await shell.installUpdate();
+  };
 
   useEffect(() => {
     if (!open || !bridge.listPairedClients) return;
@@ -193,6 +244,41 @@ export function SettingsPanel({
         <p className="text-xs text-zinc-500 dark:text-zinc-500">
           Mode: Server. Switch to Client mode from the tray menu.
         </p>
+
+        {updateState ? (
+          <div data-testid="updates-section">
+            <h3 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">Updates</h3>
+            <p className="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400" data-testid="update-status">
+              {updateState.disabled
+                ? `Viking Relay v${updateState.currentVersion} — updates are disabled in development builds.`
+                : updateState.phase === "checking"
+                  ? "Checking for updates…"
+                  : updateState.phase === "downloading"
+                    ? `Downloading v${updateState.availableVersion ?? "…"} — ${updateState.progressPct ?? 0}%`
+                    : updateState.phase === "downloaded"
+                      ? `v${updateState.availableVersion} is ready. Restart to install.`
+                      : updateState.phase === "error"
+                        ? `Update check failed: ${updateState.error ?? "unknown error"}`
+                        : updateState.phase === "not-available"
+                          ? `You're on the latest version (v${updateState.currentVersion}).`
+                          : `Viking Relay v${updateState.currentVersion} — up to date.`}
+            </p>
+            <div className="mt-2 flex items-center gap-2">
+              <Button
+                disabled={updateBusy || updateState.phase === "checking" || updateState.phase === "downloading"}
+                onClick={() => void checkForUpdates()}
+                data-testid="check-updates"
+              >
+                Check for updates
+              </Button>
+              {updateState.phase === "downloaded" ? (
+                <Button variant="primary" onClick={() => void installUpdate()} data-testid="install-update">
+                  Restart to update
+                </Button>
+              ) : null}
+            </div>
+          </div>
+        ) : null}
 
         {bridge.listPairedClients ? (
           <div data-testid="paired-clients-section">

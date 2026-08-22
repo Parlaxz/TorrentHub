@@ -6,6 +6,7 @@ import { initLogger, getLogger } from './logger'
 import { AppSettingsStore } from './settings-store'
 import { SecretStore } from './secrets'
 import { registerIpcHandlers } from './ipc'
+import { AppUpdater } from './updater'
 import { ClientRelayService } from './client-relay/service'
 import { registerClientBridgeIpc } from './server/ipc-server'
 import { registerServerBridgeIpc } from './server/ipc-server'
@@ -186,10 +187,14 @@ if (!gotLock) {
     settings = new AppSettingsStore(paths.settingsFile, log)
     const secrets = new SecretStore(paths.secretsFile, log)
 
+    const updater = new AppUpdater(log, app.getVersion())
+    updater.checkOnStartup()
+
     registerIpcHandlers({
       store: settings,
       secrets,
       log,
+      updater,
       versions: {
         app: app.getVersion(),
         electron: process.versions.electron ?? 'unknown',
