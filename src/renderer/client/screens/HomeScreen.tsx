@@ -62,13 +62,15 @@ export function HomeScreen({
   const openAddFriend = async (): Promise<void> => {
     if (!bridge) return;
     setFriendMsg(null);
+    setFriendError(null);
     setShowAdd(true);
     try {
       const list = await bridge.clientsList();
       setAvailable(list);
       setPickId(list[0]?.clientId ?? "");
-    } catch {
+    } catch (err) {
       setAvailable([]);
+      setFriendError(err instanceof Error ? err.message : "Could not reach the server.");
     }
   };
 

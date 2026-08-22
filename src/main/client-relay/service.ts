@@ -272,11 +272,24 @@ export class ClientRelayService {
 
   /** Other paired clients on the same server (potential friends). */
   async listAvailableClients(): Promise<Array<{ clientId: string; name: string }>> {
-    const response = await this.authed<{ clients: Array<{ clientId: string; name: string }> }>(
-      'GET',
-      ApiRoutes.clients,
-    )
-    return response.clients
+    try {
+      const response = await this.authed<{ clients: Array<{ clientId: string; name: string }> }>(
+        'GET',
+        ApiRoutes.clients,
+      )
+      return response.clients
+    } catch (error) {
+      // Version-skew hint: /v1/clients only exists on servers >= v0.4.0.
+      if (error instanceof RelayClientError && error.status === 404) {
+        throw new RelayClientError({
+          kind: 'not_found',
+          status: 404,
+          message:
+            'the server is running an older version — update it to v0.4.0+ and restart, then try again',
+        })
+      }
+      throw error
+    }
   }
 
   /** Client-to-client: drop a link into another paired client's queue. */
