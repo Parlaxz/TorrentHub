@@ -325,7 +325,7 @@ export class QbitClient {
   private assertOk(res: { ok: boolean; status: number; text: string }, endpoint: string): void {
     if (res.status === 401 || res.status === 403) throw new QbitAuthError();
     if (!res.ok) {
-      throw new QbitApiError(`qBittorrent API call failed (${endpoint})`, {
+      throw new QbitApiError(`qBittorrent API call failed (${endpoint}, HTTP ${res.status})`, {
         status: res.status,
         statusText: res.text.slice(0, 200),
         endpoint,

@@ -18,6 +18,7 @@ import {
   IntakeNotFoundError,
   MetadataUnavailableError,
   QbitApiError,
+  QbitAuthError,
   QbitTorrentErroredError,
   SelectionInvalidError,
   SelectionNotAppliedError,
@@ -286,11 +287,33 @@ async function addFreshStopped(
   const timeoutMs = options.metadataTimeoutMs ?? DEFAULT_METADATA_TIMEOUT_MS;
   const intervalMs = options.pollIntervalMs ?? 1000;
   const deadline = Date.now() + timeoutMs;
+  let lastError: unknown = null;
   while (Date.now() < deadline) {
-    const files = await client.getTorrentFiles(hash);
+    let files: QbitTorrentFile[];
+    try {
+      files = await client.getTorrentFiles(hash);
+    } catch (err) {
+      // A freshly added magnet has no file list yet; several qBittorrent
+      // versions answer /torrents/files with 404 (or similar) until metadata
+      // arrives. Tolerate transient lookups while waiting — auth failures
+      // will not heal, so rethrow those immediately.
+      if (err instanceof QbitAuthError) throw err;
+      lastError = err;
+      if (Date.now() >= deadline) break;
+      await sleep(intervalMs);
+      continue;
+    }
+    lastError = null;
     if (files.length > 0) return;
     if (Date.now() >= deadline) break;
     await sleep(intervalMs);
+  }
+  if (lastError !== null) {
+    const detail = lastError instanceof Error ? lastError.message : String(lastError);
+    throw new MetadataUnavailableError(
+      `Could not read the torrent's file list after adding it (${detail})`,
+      { source, infoHash: hash },
+    );
   }
   throw new MetadataUnavailableError(
     `Timed out after ${timeoutMs}ms waiting for metadata after add`,
