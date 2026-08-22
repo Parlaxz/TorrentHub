@@ -16,7 +16,9 @@ export default defineConfig({
     }
   },
   preload: {
-    plugins: [externalizeDepsPlugin()],
+    // Sandboxed preloads cannot resolve externalized node_modules at runtime,
+    // so bundle everything the preload graph pulls in (shared/* uses zod).
+    plugins: [externalizeDepsPlugin({ exclude: ['zod'] })],
     resolve: { alias: sharedAlias },
     build: {
       rollupOptions: {
