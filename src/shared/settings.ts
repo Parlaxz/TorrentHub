@@ -51,7 +51,9 @@ export const AppSettingsSchema = z.object({
   /** Client mode: saved friends (other paired clients) for direct sends. */
   friends: z
     .array(z.object({ clientId: z.string().min(1), name: z.string().min(1) }))
-    .default([])
+    .default([]),
+  /** Closing the window hides to tray instead of exiting (default on). */
+  minimizeToTrayOnClose: z.boolean().default(true)
 })
 export type AppSettings = z.infer<typeof AppSettingsSchema>
 
@@ -85,7 +87,8 @@ export const AppSettingsPatchSchema = z.object({
     .optional(),
   friends: z
     .array(z.object({ clientId: z.string().min(1), name: z.string().min(1) }))
-    .optional()
+    .optional(),
+  minimizeToTrayOnClose: z.boolean().optional()
 })
 export type AppSettingsPatch = z.infer<typeof AppSettingsPatchSchema>
 
@@ -105,5 +108,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   directAutoAccept: false,
   clientDownloadDir: null,
   clientQbitUrl: 'http://127.0.0.1:8080',
-  friends: []
+  friends: [],
+  minimizeToTrayOnClose: true
 }
+
+

@@ -53,12 +53,14 @@ function createMainWindow(): BrowserWindow {
     if (!startHidden) win.show()
   })
 
-  // Server Mode UX: closing the window hides to tray instead of terminating
-  // the relay. Actual exit goes through the tray menu / requestAppExit.
+  // Resident-by-default: closing hides to tray (both modes) unless the user
+  // disabled tray-minimize. Actual exit goes through the tray / requestAppExit.
   win.on('close', (event) => {
-    if (quitting || settings?.get().mode !== 'server') return
-    event.preventDefault()
-    win.hide()
+    if (quitting) return
+    if (settings?.get().minimizeToTrayOnClose !== false) {
+      event.preventDefault()
+      win.hide()
+    }
   })
 
   // Reject all navigation away from the app origin. In dev, allow the Vite dev server.
@@ -282,8 +284,9 @@ if (!gotLock) {
   })
 
   app.on('window-all-closed', () => {
-    // Server Mode keeps running in the tray; quit only when the user asked.
-    if (quitting || settings?.get().mode !== 'server') {
+    // Resident unless the user disabled tray-minimize (then X = real exit).
+    const resident = settings?.get().minimizeToTrayOnClose !== false
+    if (quitting || !resident) {
       app.quit()
     }
   })

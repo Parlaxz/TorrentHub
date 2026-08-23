@@ -23,6 +23,7 @@ export function GlobalSettingsModal({
   const [updateState, setUpdateState] = useState<UpdateState | null>(null)
   const [busy, setBusy] = useState(false)
   const [startWithWindows, setStartWithWindows] = useState<boolean | null>(null)
+  const [minimizeToTray, setMinimizeToTray] = useState<boolean | null>(null)
   const [dd, setDd] = useState<DdState | null>(null)
   const [qbitUrlDraft, setQbitUrlDraft] = useState('')
   const [keyDraft, setKeyDraft] = useState('')
@@ -40,7 +41,10 @@ export function GlobalSettingsModal({
     void window.vikingRelay
       .getState()
       .then((s) => {
-        if (!cancelled) setStartWithWindows(s.settings.startWithWindows)
+        if (!cancelled) {
+          setStartWithWindows(s.settings.startWithWindows)
+          setMinimizeToTray(s.settings.minimizeToTrayOnClose)
+        }
       })
       .catch(() => {})
     return () => {
@@ -57,6 +61,18 @@ export function GlobalSettingsModal({
       setStartWithWindows(s.startWithWindows)
     } catch {
       setStartWithWindows(!next)
+    }
+  }
+
+  const toggleMinimizeToTray = async (): Promise<void> => {
+    if (!window.vikingRelay || minimizeToTray === null) return
+    const next = !minimizeToTray
+    setMinimizeToTray(next)
+    try {
+      const s = await window.vikingRelay.updateSettings({ minimizeToTrayOnClose: next })
+      setMinimizeToTray(s.minimizeToTrayOnClose)
+    } catch {
+      setMinimizeToTray(!next)
     }
   }
 
@@ -218,6 +234,19 @@ export function GlobalSettingsModal({
             </label>
             <p className="mt-1 text-xs text-neutral-500">
               Launches minimized to the tray; the server auto-starts and clients reconnect on their own.
+            </p>
+            <label className="mt-3 flex items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={minimizeToTray !== false}
+                onChange={() => void toggleMinimizeToTray()}
+                className="h-4 w-4"
+                data-testid="minimize-to-tray"
+              />
+              Minimize to tray on close instead of exiting
+            </label>
+            <p className="mt-1 text-xs text-neutral-500">
+              On by default. When off, closing the window fully exits the app.
             </p>
           </div>
         ) : null}
