@@ -68,8 +68,14 @@ Write-Host "New version     : $newVersion ($Channel channel$(if ($isPrerelease) 
 Write-Host ""
 
 # 1. Bump package.json (no git tag/commit; we tag explicitly on publish).
-npm version --no-git-tag-version $newVersion
-if ($LASTEXITCODE -ne 0) { throw "npm version failed." }
+# Idempotent: skip when package.json is already at the requested version
+# (a previously failed run may have bumped it before dying).
+if ($currentVersion -ne $newVersion) {
+  npm version --no-git-tag-version $newVersion
+  if ($LASTEXITCODE -ne 0) { throw "npm version failed." }
+} else {
+  Write-Host "package.json already at $newVersion - skipping version bump."
+}
 
 # 2. Build + package.
 $publishFlag = '--publish never'
@@ -79,14 +85,18 @@ if ($Publish) {
     Write-Warning "-Publish was requested but GH_TOKEN is not set. Building WITHOUT publishing."
     Write-Warning "Set `$env:GH_TOKEN to a GitHub token with repo scope for Parlaxz/TorrentHub and re-run."
   } else {
-    $publishFlag = '--publish always'
+    $publishFlag = '--publish=always'
     $willPublish = $true
   }
 }
 
 Write-Host ""
 Write-Host "Packaging (electron-builder --win $publishFlag)..."
-npx electron-builder --win $publishFlag
+# Pass the channel explicitly so electron-builder emits <channel>.yml
+# (beta.yml for betas) instead of always latest.yml - electron-updater's
+# beta channel reads beta.yml, and without it beta clients never update.
+$builderArgs = @('--win', "-c.publish.channel=$Channel", $publishFlag)
+npx electron-builder @builderArgs
 if ($LASTEXITCODE -ne 0) { throw "electron-builder failed." }
 
 $setupName = "Viking-Relay-Setup-$newVersion.exe"
