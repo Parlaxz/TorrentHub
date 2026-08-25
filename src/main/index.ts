@@ -199,7 +199,7 @@ if (!gotLock) {
     // Mirror warn/error logs into every window's DevTools console.
     attachWindowLogMirror(() => BrowserWindow.getAllWindows())
 
-    const updater = new AppUpdater(log, app.getVersion())
+    const updater = new AppUpdater(log, app.getVersion(), settings.get().updateChannel)
     updater.checkOnStartup()
 
     // Client Mode backend (token stays in main via safeStorage).

@@ -82,6 +82,7 @@ export function App() {
     intervalMs: 700,
     fn: () => bridge!.getDraft((phase as { jobId: string }).jobId),
     onData: (draft) => {
+      if (!draft) return; // record left the draft phase (committed/gone)
       if (draft.state === "awaiting_selection" && draft.metadata) {
         setPhase({ s: "selection", draft });
       } else if (draft.state === "failed") {

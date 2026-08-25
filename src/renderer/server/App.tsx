@@ -30,7 +30,7 @@ export function ServerApp({ bridge }: { bridge: VikingRelayServerBridge | null }
 }
 
 function Gate({ bridge }: { bridge: VikingRelayServerBridge }) {
-  const { loaded, settings, health } = useRuntime();
+  const { loaded, settings, health, refreshSettings } = useRuntime();
 
   if (!loaded) {
     return (
@@ -47,7 +47,14 @@ function Gate({ bridge }: { bridge: VikingRelayServerBridge }) {
   });
 
   return firstRun ? (
-    <SetupWizard bridge={bridge} onComplete={() => undefined} />
+    // The wizard mutates settings through direct bridge calls; re-read them
+    // when it completes so the Gate can switch to the Dashboard.
+    <SetupWizard
+      bridge={bridge}
+      onComplete={() => {
+        void refreshSettings();
+      }}
+    />
   ) : (
     <Dashboard bridge={bridge} />
   );

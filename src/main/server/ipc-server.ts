@@ -131,6 +131,12 @@ export function registerClientBridgeIpc(client: ClientRelayService): void {
   const handle = makeHandle()
 
   handle(ClientIpc.getConnection, () => client.getConnection())
+  // Clipboard writes MUST go through the main process: sandboxed preload
+  // clipboard.writeText is unreliable (returns false) in current Electron.
+  handle(ClientIpc.copyText, (text: unknown) => {
+    clipboard.writeText(String(text ?? ''))
+    return true
+  })
   handle(ClientIpc.pair, (host: unknown, port: unknown, code: unknown) =>
     client.pair(String(host ?? ''), Number(port) || 47821, String(code ?? '')),
   )

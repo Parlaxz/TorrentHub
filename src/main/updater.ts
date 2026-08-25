@@ -11,11 +11,13 @@ import { autoUpdater } from 'electron-updater'
 import type { Logger } from 'pino'
 import type { UpdateState } from '@shared/ipc'
 
+export type UpdateChannel = 'stable' | 'beta'
+
 export class AppUpdater {
   private readonly log: Logger
   private state: UpdateState
 
-  constructor(log: Logger, currentVersion: string) {
+  constructor(log: Logger, currentVersion: string, channel: UpdateChannel = 'stable') {
     this.log = log
     this.state = {
       phase: 'idle',
@@ -24,9 +26,14 @@ export class AppUpdater {
       progressPct: null,
       error: null,
       disabled: !app.isPackaged,
+      channel,
     }
     if (this.state.disabled) return
 
+    autoUpdater.channel = channel
+    // Required so switching beta -> stable can install the lower stable
+    // version over an installed prerelease.
+    autoUpdater.allowDowngrade = true
     autoUpdater.autoDownload = true
     autoUpdater.autoInstallOnAppQuit = true
     autoUpdater.logger = {
@@ -84,6 +91,23 @@ export class AppUpdater {
       await autoUpdater.checkForUpdates()
     } catch {
       // The 'error' event already recorded the failure.
+    }
+    return this.getState()
+  }
+
+  /**
+   * Switches the update feed channel and immediately re-checks so the
+   * effect is visible without an app restart. allowDowngrade (set in the
+   * constructor) makes beta -> stable downgrades installable.
+   */
+  async setChannel(channel: UpdateChannel): Promise<UpdateState> {
+    if (channel !== this.state.channel) {
+      this.log.info({ from: this.state.channel, to: channel }, 'update channel changed')
+    }
+    this.set({ channel })
+    if (!this.state.disabled) {
+      autoUpdater.channel = channel
+      await this.check()
     }
     return this.getState()
   }

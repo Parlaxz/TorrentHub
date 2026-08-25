@@ -44,6 +44,14 @@ export function registerIpcHandlers(ctx: IpcContext): void {
       ctx.log.info({ patch: Object.keys(patch) }, 'settings updated')
       // Keep the Windows login item in sync no matter which surface writes it.
       if (patch.startWithWindows !== undefined) applyLoginItem(next.startWithWindows)
+      // Switch the update feed channel when it actually changed (persist
+      // first, then apply — same order as the login item above).
+      if (
+        patch.updateChannel !== undefined &&
+        ctx.updater.getState().channel !== next.updateChannel
+      ) {
+        await ctx.updater.setChannel(next.updateChannel)
+      }
       return next
     },
 

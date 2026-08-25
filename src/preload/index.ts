@@ -1,4 +1,4 @@
-import { clipboard, contextBridge, ipcRenderer } from 'electron'
+import { contextBridge, ipcRenderer } from 'electron'
 import type { AppMode } from '@shared/domain'
 import type { AppSettingsPatch } from '@shared/settings'
 import { IpcChannels } from '@shared/ipc'
@@ -88,8 +88,8 @@ const clientBridge = {
 
   copyText: async (text: string): Promise<boolean> => {
     try {
-      clipboard.writeText(String(text))
-      return true
+      // Main-process clipboard: sandboxed preload writeText is unreliable.
+      return await ipcRenderer.invoke(ClientIpc.copyText, String(text))
     } catch {
       return false
     }

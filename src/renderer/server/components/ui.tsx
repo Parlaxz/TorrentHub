@@ -146,13 +146,14 @@ export function Toggle({
   label,
   description,
   disabled = false,
+  ...rest
 }: {
   checked: boolean;
   onChange: (next: boolean) => void;
   label: string;
   description?: string;
   disabled?: boolean;
-}) {
+} & Omit<React.HTMLAttributes<HTMLButtonElement>, "onChange" | "disabled" | "aria-checked" | "role">) {
   return (
     <label className={`flex items-start justify-between gap-4 ${disabled ? "opacity-50" : ""}`}>
       <span>
@@ -171,6 +172,7 @@ export function Toggle({
         className={`relative mt-0.5 h-5 w-9 shrink-0 rounded-full transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500 ${
           checked ? "bg-blue-600" : "bg-zinc-300 dark:bg-zinc-700"
         }`}
+        {...rest}
       >
         <span
           className={`absolute top-0.5 left-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform ${
@@ -201,6 +203,15 @@ export function Modal({
 
   useEffect(() => {
     if (!open) return;
+    // Move focus into the dialog when it opens (A11Y): first focusable
+    // element, falling back to the panel itself (focusable via tabIndex).
+    const panel = panelRef.current;
+    if (panel) {
+      const focusables = panel.querySelectorAll<HTMLElement>(
+        'button, input, [href], select, textarea, [tabindex]:not([tabindex="-1"])',
+      );
+      (focusables[0] ?? panel).focus();
+    }
     const onKey = (event: KeyboardEvent) => {
       if (event.key === "Escape") onClose();
       if (event.key === "Tab" && panelRef.current) {
@@ -236,7 +247,8 @@ export function Modal({
         role="dialog"
         aria-modal="true"
         aria-label={title}
-        className={`w-full ${wide ? "max-w-lg" : "max-w-md"} rounded-xl border border-zinc-200 bg-white p-5 shadow-xl dark:border-zinc-700 dark:bg-zinc-900`}
+        tabIndex={-1}
+        className={`max-h-[85vh] w-full overflow-y-auto ${wide ? "max-w-lg" : "max-w-md"} rounded-xl border border-zinc-200 bg-white p-5 shadow-xl outline-none dark:border-zinc-700 dark:bg-zinc-900`}
       >
         <div className="mb-4 flex items-center justify-between">
           <h2 className="text-base font-semibold text-zinc-900 dark:text-zinc-50">{title}</h2>

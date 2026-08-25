@@ -20,6 +20,9 @@ asar: true
 extraResources:
   - from: build/icon.png
     to: icon.png
+  # Emergency rollback helper shipped into <install>\resources\.
+  - from: build/revert-to-stable.bat
+    to: revert-to-stable.bat
 
 win:
   target:

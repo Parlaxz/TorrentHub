@@ -224,6 +224,11 @@ export class ServerController implements VikingRelayServerBridge {
     const clean = String(hash ?? '').trim();
     if (clean.length === 0) {
       this.#host.secrets.delete(SECRET_VIKING_USER_HASH);
+      this.swapVikingClient();
+      // Explicit "Anonymous" choice: report the resulting mode so the wizard
+      // radio reflects the selection and the step can complete. (Plain
+      // getVikingConfig() keeps reporting 'unconfigured' before any choice.)
+      return { ...(await this.getVikingConfig()), mode: 'anonymous' };
     } else {
       const ok = this.#host.secrets.set(SECRET_VIKING_USER_HASH, clean);
       if (!ok) {
@@ -400,6 +405,10 @@ export class ServerController implements VikingRelayServerBridge {
     return jobs
       .filter((j) => isTerminalJobState(j.state))
       .filter((j) => (archivedOnly ? j.archived === true : j.archived !== true))
+      // Dismissed interrupted jobs are acknowledged: they must stop driving
+      // the Dashboard banner (dismissInterruptedJob persists dismissed=true,
+      // but without this filter the banner could never clear).
+      .filter((j) => j.dismissed !== true)
       .slice(0, Math.max(1, Math.min(500, limit)))
       .map(toHistoryEntry);
   }
@@ -622,8 +631,19 @@ export class ServerController implements VikingRelayServerBridge {
     }
     try {
       const job = await this.findActiveJob();
+      const previous = this.#lastJob;
       this.#lastJob = job;
       this.#events.emit('job', job);
+      // Terminal transition: findActiveJob() stops reporting a finished job,
+      // so without this final push renderers would never learn the outcome
+      // (fast pipelines can finish between two ticks) and "Recent transfers"
+      // would stay stale until restart.
+      if (!job && previous) {
+        const record = (await this.allJobs()).find((r) => r.id === previous.id);
+        if (record && isTerminalJobState(record.state)) {
+          this.#events.emit('job', toTransferSnapshot(record));
+        }
+      }
     } catch (error) {
       this.#host.log.warn({ err: error }, 'job tick failed');
     }
@@ -655,6 +675,15 @@ export class ServerController implements VikingRelayServerBridge {
       () => this.currentQbit(),
       () => this.currentViking(),
     );
+    // Live transfer mirror: push a snapshot after every persisted record
+    // change (progress ticks AND terminal transitions). The 1 s pushTick
+    // alone cannot observe short pipelines, so completions would never
+    // reach the Dashboard ("Recent transfers" stayed stale until restart).
+    this.#graph.onRecordChanged((record) => {
+      const snapshot = toTransferSnapshot(record);
+      this.#lastJob = isTerminalJobState(record.state) ? null : snapshot;
+      this.#events.emit('job', snapshot);
+    });
     return this.#graph;
   }
 

@@ -30,7 +30,7 @@ export const intakeCreateSchema = z.strictObject({
 
 export const jobCreateSchema = z.strictObject({
   intakeId: z.string().regex(SAFE_ID_RE),
-  selection: z.array(z.number().int().min(0).max(1_000_000)).max(10_000).nullish(),
+  selection: z.array(z.number().int().min(0).max(1_000_000)).min(1).max(10_000).nullish(),
   zipRequired: z.boolean().nullish(),
   idempotencyKey: idempotencyKeySchema,
   cleanup: z

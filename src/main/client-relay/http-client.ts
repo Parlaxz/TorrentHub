@@ -5,7 +5,7 @@
  * encrypted (safeStorage) and attached here, in the main process, on every
  * authenticated request against the Server PC's /v1 REST API.
  */
-import { ApiRoutes } from '@shared/api'
+import { ApiRoutes, type ServerStatusResponse } from '@shared/api'
 
 export type RelayErrorKind =
   | 'unreachable'
@@ -151,6 +151,14 @@ export class RelayHttpClient {
 
   health(timeoutMs = 4000): Promise<{ ok: true }> {
     return this.request<{ ok: true }>('GET', ApiRoutes.health, undefined, { timeoutMs })
+  }
+
+  /** AUTHENTICATED liveness probe — 401s when the token was revoked. */
+  serverStatus(token?: string | null, timeoutMs = 4000): Promise<ServerStatusResponse> {
+    return this.request<ServerStatusResponse>('GET', ApiRoutes.serverStatus, undefined, {
+      token,
+      timeoutMs,
+    })
   }
 }
 

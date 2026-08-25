@@ -66,6 +66,7 @@ export type SetupAction =
   | { type: "QBIT_PROBE_START" }
   | { type: "QBIT_PROBE_RESULT"; result: QbitProbeResult }
   | { type: "VIKING_CONFIG"; config: VikingConfigView }
+  | { type: "VIKING_MODE_PICK"; mode: "anonymous" | "user_hash" }
   | { type: "VIKING_HASH_INPUT"; value: string }
   | { type: "VIKING_HASH_SAVED"; config: VikingConfigView }
   | { type: "VIKING_TEST_RESULT"; result: VikingTestResult | null }
@@ -190,6 +191,13 @@ export function setupReducer(state: SetupState, action: SetupAction): SetupState
       return { ...state, qbitBusy: false, qbitProbe: action.result };
     case "VIKING_CONFIG":
       return { ...state, viking: action.config, vikingBusy: false };
+    case "VIKING_MODE_PICK":
+      // Local radio selection: flips the mode immediately so the choice is
+      // reflected (checked state, hash field visibility) before any save.
+      return {
+        ...state,
+        viking: state.viking ? { ...state.viking, mode: action.mode } : state.viking,
+      };
     case "VIKING_HASH_INPUT":
       return { ...state, vikingHashInput: action.value };
     case "VIKING_HASH_SAVED":

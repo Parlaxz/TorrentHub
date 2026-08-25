@@ -89,7 +89,12 @@ export function StepViking({ bridge, state, dispatch }: StepProps) {
                 type="radio"
                 name="viking-mode"
                 checked={viking.mode === "anonymous"}
-                onChange={() => void chooseAnonymous()}
+                onChange={() => {
+                  // Optimistic local flip: reflect the choice immediately
+                  // instead of waiting for the persist round-trip.
+                  dispatch({ type: "VIKING_MODE_PICK", mode: "anonymous" });
+                  void chooseAnonymous();
+                }}
               />
               <span>
                 Anonymous
@@ -103,7 +108,12 @@ export function StepViking({ bridge, state, dispatch }: StepProps) {
                 type="radio"
                 name="viking-mode"
                 checked={viking.mode === "user_hash"}
-                onChange={() => document.getElementById("setup-viking-hash")?.focus()}
+                onChange={() => {
+                  // Reveal the hash field immediately; the mode flips locally
+                  // and is persisted by "Save hash" below.
+                  dispatch({ type: "VIKING_MODE_PICK", mode: "user_hash" });
+                  document.getElementById("setup-viking-hash")?.focus();
+                }}
               />
               <span>
                 Viking account (user hash)

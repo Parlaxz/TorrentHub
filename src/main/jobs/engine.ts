@@ -93,7 +93,11 @@ export class JobEngine {
    * Fetches metadata only. With an idempotency key, repeated calls return
    * the same draft/job instead of creating duplicates.
    */
-  async createIntake(sourceInput: string, idempotencyKey?: string | null): Promise<JobRecord> {
+  async createIntake(
+    sourceInput: string,
+    idempotencyKey?: string | null,
+    clientId?: string | null,
+  ): Promise<JobRecord> {
     const source = parseIntakeSource(sourceInput);
     const key = normalizeIdempotencyKey(idempotencyKey);
 
@@ -104,7 +108,7 @@ export class JobEngine {
       if (pending) return pending;
     }
 
-    const creation = this.#createIntakeInner(source, key);
+    const creation = this.#createIntakeInner(source, key, clientId ?? null);
     if (!key) return creation;
     this.#pendingIntakes.set(key, creation);
     try {
@@ -114,7 +118,11 @@ export class JobEngine {
     }
   }
 
-  async #createIntakeInner(source: IntakeSource, key: string | null): Promise<JobRecord> {
+  async #createIntakeInner(
+    source: IntakeSource,
+    key: string | null,
+    clientId: string | null,
+  ): Promise<JobRecord> {
     const now = new Date().toISOString();
     const record: JobRecord = {
       id: newJobId(),
@@ -122,6 +130,7 @@ export class JobEngine {
       updatedAt: now,
       state: "reading_metadata",
       source,
+      clientId,
       idempotencyKey: key,
       stages: initialStageMap(),
       metadata: null,

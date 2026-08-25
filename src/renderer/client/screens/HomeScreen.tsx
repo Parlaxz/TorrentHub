@@ -246,6 +246,7 @@ export function HomeScreen({
                   value={pickId}
                   onChange={(e) => setPickId(e.target.value)}
                   className="w-full rounded-md border border-zinc-300 bg-white px-2 py-1.5 text-sm dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
+                  aria-label="Choose paired client"
                   data-testid="add-friend-select"
                 >
                   {available.map((c) => (

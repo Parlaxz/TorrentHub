@@ -126,13 +126,14 @@ export class ClientRelayService {
     const conn = this.getConnection()
     if (!conn || !this.token()) return { state: 'unpaired' }
     try {
-      await this.client()!.health()
+      // AUTHENTICATED probe: public /v1/health never 401s, so a revoked token
+      // would keep reporting "connected". /v1/server/status requires the
+      // bearer token and is the truthful liveness+authorization check.
+      await this.client()!.serverStatus(this.token())
       return { state: 'connected', host: conn.host, port: conn.port }
     } catch (error) {
       return {
-        state: error instanceof RelayClientError && error.kind === 'unauthorized'
-          ? 'offline'
-          : 'offline',
+        state: 'offline',
         host: conn.host,
         port: conn.port,
       }

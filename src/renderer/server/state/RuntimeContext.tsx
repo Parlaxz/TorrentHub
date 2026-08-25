@@ -34,10 +34,14 @@ export interface RuntimeValue {
   generatePairing: () => Promise<void>;
   clearPairing: () => void;
   saveSettings: (patch: SettingsPatch) => Promise<void>;
+  refreshSettings: () => Promise<void>;
   refreshHistory: () => Promise<void>;
 }
 
 const RuntimeContext = createContext<RuntimeValue | null>(null);
+
+/** Job states that finalize the persisted history record. */
+const TERMINAL_JOB_STATES = new Set(["complete", "failed", "cancelled", "interrupted"]);
 
 export function useRuntime(): RuntimeValue {
   const value = useContext(RuntimeContext);
@@ -106,9 +110,24 @@ export function RuntimeProvider({
     [bridge],
   );
 
+  // Re-reads settings from main. Required after flows that mutate settings
+  // OUTSIDE saveSettings (e.g. the setup wizard's setWorkingFolderPath /
+  // setQbitApiKey): without it the Gate keeps rendering the wizard even
+  // after setup completed and the server started.
+  const refreshSettings = useCallback(async () => {
+    const next = await bridge.getSettings();
+    if (mountedRef.current) setSettings(next);
+  }, [bridge]);
+
   const refreshHistory = useCallback(async () => {
     setHistory(await bridge.getHistory(20));
   }, [bridge]);
+
+  // A pushed terminal job snapshot means the persisted history just changed —
+  // re-read it so "Recent transfers" reflects completions without a restart.
+  useEffect(() => {
+    if (job && TERMINAL_JOB_STATES.has(job.state)) void refreshHistory();
+  }, [job, refreshHistory]);
 
   const value = useMemo<RuntimeValue>(
     () => ({
@@ -122,6 +141,7 @@ export function RuntimeProvider({
       generatePairing,
       clearPairing,
       saveSettings,
+      refreshSettings,
       refreshHistory,
     }),
     [
@@ -135,6 +155,7 @@ export function RuntimeProvider({
       generatePairing,
       clearPairing,
       saveSettings,
+      refreshSettings,
       refreshHistory,
     ],
   );

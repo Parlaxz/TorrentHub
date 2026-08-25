@@ -39,28 +39,60 @@ export type PublicJobSnapshot = Omit<
   storagePreflight?: JobRecord['preflight'] | null;
 };
 
-const INTAKE_STATES = new Set(['reading_metadata', 'awaiting_selection']);
+const INTAKE_STATES = new Set(['reading_metadata', 'awaiting_selection', 'failed']);
+
+/**
+ * Tenant visibility: a clientId-scoped caller sees ONLY records attributed to
+ * that client. Records without attribution (server-local or pre-upgrade
+ * history files) are visible exclusively to the server Dashboard, which calls
+ * with no clientId.
+ */
+function isVisible(record: JobRecord, clientId?: string | null): boolean {
+  if (clientId == null) return true;
+  return record.clientId === clientId;
+}
 
 export class EngineJobService implements JobService {
   constructor(private readonly engine: JobEngine) {}
 
   async createIntake(input: CreateIntakeInput): Promise<IntakeDraftView> {
-    const record = await this.engine.createIntake(input.source.value, input.idempotencyKey ?? null);
+    const record = await this.engine.createIntake(
+      input.source.value,
+      input.idempotencyKey ?? null,
+      input.clientId ?? null,
+    );
     return toDraftView(record);
   }
 
-  async getIntake(intakeId: string): Promise<IntakeDraftView | null> {
+  async getIntake(intakeId: string, clientId?: string | null): Promise<IntakeDraftView | null> {
     let record: JobRecord;
     try {
       record = await this.engine.getJob(intakeId);
     } catch {
       return null;
     }
+    if (!isVisible(record, clientId)) return null;
+    // 'failed' is part of the draft contract (IntakeDraftView['state']): an
+    // intake whose metadata read failed must reach the client so it can show
+    // the error screen instead of spinning on "reading metadata" forever.
     if (!INTAKE_STATES.has(record.state)) return null;
     return toDraftView(record);
   }
 
   async createJob(input: CreateJobInput): Promise<PublicJobSnapshot> {
+    // Ownership check: a paired client may only commit a selection on an
+    // intake it created itself. Anything else (other tenant's intake, or an
+    // unattributed/legacy record) reads as not found.
+    if (input.clientId != null) {
+      let intake: JobRecord;
+      try {
+        intake = await this.engine.getJob(input.intakeId);
+      } catch (error) {
+        if (error instanceof JobNotFoundError) throw jobNotFound(input.intakeId);
+        throw error;
+      }
+      if (!isVisible(intake, input.clientId)) throw jobNotFound(input.intakeId);
+    }
     const selection = input.selection ?? [];
     try {
       const record = await this.engine.commitSelection(
@@ -82,21 +114,42 @@ export class EngineJobService implements JobService {
     }
   }
 
-  async listJobs(): Promise<PublicJobSnapshot[]> {
+  async listJobs(clientId?: string | null): Promise<PublicJobSnapshot[]> {
     const jobs = await this.engine.listJobs();
-    return jobs.map(toPublicJob);
+    return jobs.filter((j) => isVisible(j, clientId)).map(toPublicJob);
   }
 
-  async getJob(jobId: string): Promise<PublicJobSnapshot | null> {
+  async getJob(jobId: string, clientId?: string | null): Promise<PublicJobSnapshot | null> {
     try {
-      return toPublicJob(await this.engine.getJob(jobId));
+      const record = await this.engine.getJob(jobId);
+      if (!isVisible(record, clientId)) return null;
+      return toPublicJob(record);
     } catch (error) {
       if (error instanceof JobNotFoundError) return null;
       throw error;
     }
   }
 
-  async cancelJob(jobId: string): Promise<PublicJobSnapshot> {
+  /**
+   * Mutation ownership precheck: a paired client may only mutate records
+   * attributed to itself. Anything else (another tenant's job, or an
+   * unattributed/legacy record) reads as not found — same rule and same
+   * 404 shape as the createJob intake precheck, so existence is never leaked.
+   */
+  private async assertMutableBy(jobId: string, clientId?: string | null): Promise<void> {
+    if (clientId == null) return;
+    let record: JobRecord;
+    try {
+      record = await this.engine.getJob(jobId);
+    } catch (error) {
+      if (error instanceof JobNotFoundError) throw jobNotFound(jobId);
+      throw error;
+    }
+    if (!isVisible(record, clientId)) throw jobNotFound(jobId);
+  }
+
+  async cancelJob(jobId: string, clientId?: string | null): Promise<PublicJobSnapshot> {
+    await this.assertMutableBy(jobId, clientId);
     try {
       return toPublicJob(await this.engine.cancel(jobId));
     } catch (error) {
@@ -104,7 +157,8 @@ export class EngineJobService implements JobService {
     }
   }
 
-  async retryPackaging(jobId: string): Promise<PublicJobSnapshot> {
+  async retryPackaging(jobId: string, clientId?: string | null): Promise<PublicJobSnapshot> {
+    await this.assertMutableBy(jobId, clientId);
     try {
       await this.engine.retryPackaging(jobId);
     } catch (error) {
@@ -113,7 +167,8 @@ export class EngineJobService implements JobService {
     return toPublicJob(await this.engine.getJob(jobId));
   }
 
-  async retryUpload(jobId: string): Promise<PublicJobSnapshot> {
+  async retryUpload(jobId: string, clientId?: string | null): Promise<PublicJobSnapshot> {
+    await this.assertMutableBy(jobId, clientId);
     try {
       await this.engine.retryUpload(jobId);
     } catch (error) {
@@ -122,7 +177,8 @@ export class EngineJobService implements JobService {
     return toPublicJob(await this.engine.getJob(jobId));
   }
 
-  async recheckStorage(jobId: string): Promise<PublicJobSnapshot> {
+  async recheckStorage(jobId: string, clientId?: string | null): Promise<PublicJobSnapshot> {
+    await this.assertMutableBy(jobId, clientId);
     try {
       await this.engine.retryStorageCheck(jobId);
     } catch (error) {
@@ -131,9 +187,13 @@ export class EngineJobService implements JobService {
     return toPublicJob(await this.engine.getJob(jobId));
   }
 
-  async listHistory(limit?: number): Promise<PublicJobSnapshot[]> {
+  async listHistory(limit?: number, clientId?: string | null): Promise<PublicJobSnapshot[]> {
     const jobs = await this.engine.listJobs();
-    return jobs.filter((j) => isTerminalJobState(j.state)).slice(0, limit ?? 50).map(toPublicJob);
+    return jobs
+      .filter((j) => isVisible(j, clientId))
+      .filter((j) => isTerminalJobState(j.state))
+      .slice(0, limit ?? 50)
+      .map(toPublicJob);
   }
 }
 
@@ -157,6 +217,7 @@ function toPublicJob(record: JobRecord): PublicJobSnapshot {
     updatedAt: record.updatedAt,
     state: record.state,
     source: record.source,
+    clientId: record.clientId ?? null,
     selection: record.selection ?? null,
     selectedBytes: record.selectedBytes ?? null,
     zipRequired: record.zipRequired ?? null,

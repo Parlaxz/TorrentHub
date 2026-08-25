@@ -82,13 +82,14 @@ export function registerRoutes(app: FastifyInstance, deps: RelayAppDeps): void {
       const view = await jobs.createIntake({
         source: parsed.data.source,
         idempotencyKey: resolveIdempotencyKey(req, parsed.data.idempotencyKey ?? null),
+        clientId: req.client!.clientId,
       });
       return reply.code(201).send(view);
     });
 
     api.get("/intakes/:id", async (req) => {
       const id = requireId(req);
-      const view = await jobs.getIntake(id);
+      const view = await jobs.getIntake(id, req.client!.clientId);
       if (!view) throw jobNotFound(id);
       return view;
     });
@@ -104,30 +105,31 @@ export function registerRoutes(app: FastifyInstance, deps: RelayAppDeps): void {
         zipRequired: parsed.data.zipRequired ?? null,
         idempotencyKey: resolveIdempotencyKey(req, parsed.data.idempotencyKey ?? null),
         cleanup: parsed.data.cleanup ?? null,
+        clientId: req.client!.clientId,
       });
       return reply.code(201).send(record);
     });
 
-    api.get("/jobs", async () => ({ jobs: await jobs.listJobs() }));
+    api.get("/jobs", async (req) => ({ jobs: await jobs.listJobs(req.client!.clientId) }));
 
     api.get("/jobs/:id", async (req) => {
       const id = requireId(req);
-      const record = await jobs.getJob(id);
+      const record = await jobs.getJob(id, req.client!.clientId);
       if (!record) throw jobNotFound(id);
       return record;
     });
 
-    api.post("/jobs/:id/cancel", async (req) => jobs.cancelJob(requireId(req)));
-    api.post("/jobs/:id/retry-packaging", async (req) => jobs.retryPackaging(requireId(req)));
-    api.post("/jobs/:id/retry-upload", async (req) => jobs.retryUpload(requireId(req)));
-    api.post("/jobs/:id/recheck-storage", async (req) => jobs.recheckStorage(requireId(req)));
+    api.post("/jobs/:id/cancel", async (req) => jobs.cancelJob(requireId(req), req.client!.clientId));
+    api.post("/jobs/:id/retry-packaging", async (req) => jobs.retryPackaging(requireId(req), req.client!.clientId));
+    api.post("/jobs/:id/retry-upload", async (req) => jobs.retryUpload(requireId(req), req.client!.clientId));
+    api.post("/jobs/:id/recheck-storage", async (req) => jobs.recheckStorage(requireId(req), req.client!.clientId));
 
     api.get("/history", async (req) => {
       const parsed = historyQuerySchema.safeParse((req.query as Record<string, unknown>) ?? {});
       if (!parsed.success) {
         throw new ServiceError(400, "validation_error", "invalid history query");
       }
-      return { history: await jobs.listHistory(parsed.data.limit) };
+      return { history: await jobs.listHistory(parsed.data.limit, req.client!.clientId) };
     });
 
     api.get("/server/status", async () => ({

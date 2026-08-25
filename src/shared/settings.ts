@@ -53,7 +53,9 @@ export const AppSettingsSchema = z.object({
     .array(z.object({ clientId: z.string().min(1), name: z.string().min(1) }))
     .default([]),
   /** Closing the window hides to tray instead of exiting (default on). */
-  minimizeToTrayOnClose: z.boolean().default(true)
+  minimizeToTrayOnClose: z.boolean().default(true),
+  /** Auto-update feed channel: 'stable' releases or 'beta' prereleases. */
+  updateChannel: z.enum(['stable', 'beta']).default('stable')
 })
 export type AppSettings = z.infer<typeof AppSettingsSchema>
 
@@ -88,7 +90,8 @@ export const AppSettingsPatchSchema = z.object({
   friends: z
     .array(z.object({ clientId: z.string().min(1), name: z.string().min(1) }))
     .optional(),
-  minimizeToTrayOnClose: z.boolean().optional()
+  minimizeToTrayOnClose: z.boolean().optional(),
+  updateChannel: z.enum(['stable', 'beta']).optional()
 })
 export type AppSettingsPatch = z.infer<typeof AppSettingsPatchSchema>
 
@@ -109,7 +112,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   clientDownloadDir: null,
   clientQbitUrl: 'http://127.0.0.1:8080',
   friends: [],
-  minimizeToTrayOnClose: true
+  minimizeToTrayOnClose: true,
+  updateChannel: 'stable'
 }
 
 

@@ -44,7 +44,10 @@ export function classifyJobError(err: JobError): ClientErrorKind {
     case "finalize":
       return "upload_failed";
     case "download":
-      return "unknown";
+      // Download-stage failures carry meaningful messages (e.g. commit-time
+      // duplicate refusal: "identical torrent exists…"). Fall through to the
+      // message heuristics instead of collapsing everything to "unknown".
+      break;
     case "metadata":
       break; // fall through to message heuristics
   }

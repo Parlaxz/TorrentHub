@@ -19,6 +19,7 @@ import { TokenStore } from '../auth/tokenStore';
 import { JobEngine } from '../jobs';
 import { JsonJobRepository, FsWorkspaceGateway, resolveConfig } from '../jobs';
 import type { JobRepository } from '../jobs/gateways';
+import type { JobRecord } from '../jobs/types';
 import { QbitTorrentService } from '../qbit';
 import { VikingClient } from '../viking';
 import { createRelayManager } from '../relay';
@@ -60,6 +61,8 @@ export interface EngineGraph {
   jobService: EngineJobService;
   auth: AuthController;
   repository: JobRepository;
+  /** Fired after every persisted record change (progress ticks + terminal). */
+  onRecordChanged(cb: (record: JobRecord) => void): () => void;
 }
 
 export function buildQbitService(host: CompositionHost): QbitTorrentService {
@@ -74,6 +77,9 @@ export function buildQbitService(host: CompositionHost): QbitTorrentService {
 export function buildVikingClient(host: CompositionHost): VikingClient {
   const userHash = host.secrets.get(SECRET_VIKING_USER_HASH);
   return new VikingClient({
+    // TEST SEAM: E2E harness points uploads at a local mock. Unset in normal
+    // use ⇒ production default (https://vikingfile.com) is unchanged.
+    baseUrl: process.env.VIKING_BASE_URL || undefined,
     userHash: userHash ?? undefined,
     logger: {
       debug: (m, meta) => host.log.debug({ m, meta }, 'viking'),
@@ -114,9 +120,29 @@ export function buildEngineGraph(
     warn: (obj, msg) => host.log.warn(obj, msg),
   });
   const workspace = new FsWorkspaceGateway(resolveJobsRoot(host));
-  const repository = new JsonJobRepository({
+  const inner = new JsonJobRepository({
     filePath: join(host.userDataDir, 'data', 'job-history.json'),
   });
+
+  // Observable wrapper: the controller pushes live transfer snapshots from
+  // persisted record changes. Polling alone (1 s pushTick) cannot observe
+  // short pipelines, so terminal states would never reach the UI.
+  const changeListeners = new Set<(record: JobRecord) => void>();
+  const repository: JobRepository = {
+    loadAll: () => inner.loadAll(),
+    upsert: async (record) => {
+      await inner.upsert(record);
+      for (const cb of changeListeners) {
+        try {
+          cb(record);
+        } catch {
+          // Listener errors must never break persistence.
+        }
+      }
+    },
+    get: (id) => inner.get(id),
+    findByIdempotencyKey: (key) => inner.findByIdempotencyKey(key),
+  };
 
   const engine = new JobEngine(
     { torrent, direct, viking, packaging, storage, workspace, repository },
@@ -134,7 +160,16 @@ export function buildEngineGraph(
       },
     }),
   );
-  return { engine, jobService: new EngineJobService(engine), auth, repository };
+  return {
+    engine,
+    jobService: new EngineJobService(engine),
+    auth,
+    repository,
+    onRecordChanged(cb) {
+      changeListeners.add(cb);
+      return () => changeListeners.delete(cb);
+    },
+  };
 }
 
 /** Builds a fresh relay transport around the stable engine graph. */

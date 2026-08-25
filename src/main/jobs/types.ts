@@ -171,6 +171,12 @@ export interface JobRecord {
   state: JobState;
 
   source: IntakeSource;
+  /**
+   * Paired client that created this job's intake (tenant attribution).
+   * null/undefined = server-local or pre-upgrade record: visible ONLY to the
+   * server Dashboard, never to paired clients.
+   */
+  clientId?: string | null;
   /** Idempotency key bound at intake time (optional). */
   idempotencyKey?: string | null;
   /** Idempotency key bound at Start/commit time (optional, separate scope). */

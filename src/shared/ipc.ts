@@ -64,6 +64,8 @@ export interface UpdateState {
   error: string | null
   /** True in dev builds — the updater only runs when packaged. */
   disabled: boolean
+  /** Active update feed channel ('stable' or 'beta'). */
+  channel: 'stable' | 'beta'
 }
 
 const SecretKeySchema = z

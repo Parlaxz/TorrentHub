@@ -3,7 +3,7 @@
  * Hosts the in-app updater and, in Client mode, the "friend" receiver
  * settings (direct downloads from the paired server).
  */
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { UpdateState } from '@shared/ipc'
 
 interface DdState {
@@ -28,6 +28,29 @@ export function GlobalSettingsModal({
   const [qbitUrlDraft, setQbitUrlDraft] = useState('')
   const [keyDraft, setKeyDraft] = useState('')
   const [dirDraft, setDirDraft] = useState('')
+  const panelRef = useRef<HTMLDivElement>(null)
+
+  // Move focus into the dialog when it opens (A11Y parity with server Modal).
+  useEffect(() => {
+    if (!open) return
+    const panel = panelRef.current
+    if (panel) {
+      const focusables = panel.querySelectorAll<HTMLElement>(
+        'button, input, [href], select, textarea, [tabindex]:not([tabindex="-1"])'
+      )
+      ;(focusables[0] ?? panel).focus()
+    }
+  }, [open])
+
+  useEffect(() => {
+    if (!open) return
+    // Escape closes the modal — parity with the server-side Modal component.
+    const onKey = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape') onClose()
+    }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [open, onClose])
 
   useEffect(() => {
     if (!open || !window.vikingRelay) return
@@ -120,6 +143,17 @@ export function GlobalSettingsModal({
     await window.vikingRelay.installUpdate()
   }
 
+  const switchChannel = async (channel: 'stable' | 'beta'): Promise<void> => {
+    if (!window.vikingRelay || updateState?.channel === channel) return
+    try {
+      await window.vikingRelay.updateSettings({ updateChannel: channel })
+      // Refresh status against the new channel immediately.
+      setUpdateState(await window.vikingRelay.checkForUpdates())
+    } catch {
+      /* keep previous state; the next getUpdateState refresh reconciles */
+    }
+  }
+
   const saveDd = async (patch: {
     autoAccept?: boolean
     qbitUrl?: string
@@ -148,9 +182,11 @@ export function GlobalSettingsModal({
     }
   }
 
+  const channelLabel = updateState ? ` (${updateState.channel} channel)` : ''
+
   const statusText = updateState
     ? updateState.disabled
-      ? `Viking Relay v${updateState.currentVersion} — updates are disabled in development builds.`
+      ? `Viking Relay v${updateState.currentVersion}${channelLabel} — updates are disabled in development builds.`
       : updateState.phase === 'checking'
         ? 'Checking for updates…'
         : updateState.phase === 'downloading'
@@ -160,8 +196,8 @@ export function GlobalSettingsModal({
             : updateState.phase === 'error'
               ? `Update check failed: ${updateState.error ?? 'unknown error'}`
               : updateState.phase === 'not-available'
-                ? `You're on the latest version (v${updateState.currentVersion}).`
-                : `Viking Relay v${updateState.currentVersion} — up to date.`
+                ? `You're on the latest version (v${updateState.currentVersion})${channelLabel}.`
+                : `Viking Relay v${updateState.currentVersion}${channelLabel} — up to date.`
     : '…'
 
   return (
@@ -174,7 +210,9 @@ export function GlobalSettingsModal({
       data-testid="global-settings-modal"
     >
       <div
-        className="max-h-[85vh] w-full max-w-md overflow-y-auto rounded-lg border border-neutral-800 bg-neutral-900 p-5 text-neutral-200 shadow-xl"
+        ref={panelRef}
+        tabIndex={-1}
+        className="max-h-[85vh] w-full max-w-md overflow-y-auto rounded-lg border border-neutral-800 bg-neutral-900 p-5 text-neutral-200 shadow-xl outline-none"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between">
@@ -216,6 +254,35 @@ export function GlobalSettingsModal({
                 Restart to update
               </button>
             ) : null}
+          </div>
+
+          <div className="mt-3" data-testid="update-channel-selector">
+            <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">
+              Update channel
+            </p>
+            <div className="mt-1 flex items-center gap-2">
+              {(['stable', 'beta'] as const).map((ch) => (
+                <button
+                  key={ch}
+                  type="button"
+                  role="radio"
+                  aria-checked={updateState?.channel === ch}
+                  disabled={busy || updateState?.phase === 'checking'}
+                  onClick={() => void switchChannel(ch)}
+                  className={
+                    updateState?.channel === ch
+                      ? 'rounded border border-emerald-600 bg-emerald-900/40 px-3 py-1 text-xs font-medium text-emerald-200'
+                      : 'rounded border border-neutral-700 px-3 py-1 text-xs hover:bg-neutral-800'
+                  }
+                  data-testid={`update-channel-${ch}`}
+                >
+                  {ch === 'stable' ? 'Stable' : 'Beta'}
+                </button>
+              ))}
+            </div>
+            <p className="mt-1 text-xs text-neutral-500">
+              Beta delivers prereleases as soon as they publish; Stable only offers final releases.
+            </p>
           </div>
         </div>
 
@@ -274,6 +341,7 @@ export function GlobalSettingsModal({
                 value={qbitUrlDraft}
                 onChange={(e) => setQbitUrlDraft(e.target.value)}
                 placeholder="Your qBittorrent WebUI URL (http://127.0.0.1:8080)"
+                aria-label="qBittorrent WebUI URL"
                 className="w-full rounded border border-neutral-700 bg-neutral-950 px-2 py-1.5 font-mono text-neutral-200"
                 data-testid="dd-qbit-url"
               />
@@ -283,6 +351,7 @@ export function GlobalSettingsModal({
                 onChange={(e) => setKeyDraft(e.target.value)}
                 placeholder={dd.settings.qbitKeySet ? 'API key saved ✓' : 'qBittorrent API key'}
                 autoComplete="off"
+                aria-label="qBittorrent API key"
                 className="w-full rounded border border-neutral-700 bg-neutral-950 px-2 py-1.5 font-mono text-neutral-200"
                 data-testid="dd-qbit-key"
               />
@@ -290,6 +359,7 @@ export function GlobalSettingsModal({
                 value={dirDraft}
                 onChange={(e) => setDirDraft(e.target.value)}
                 placeholder="Download folder (D:\\Downloads)"
+                aria-label="Download folder"
                 className="w-full rounded border border-neutral-700 bg-neutral-950 px-2 py-1.5 font-mono text-neutral-200"
                 data-testid="dd-download-dir"
               />
