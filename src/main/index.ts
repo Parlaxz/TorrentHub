@@ -1,7 +1,8 @@
 import { app, nativeTheme, powerMonitor, session, shell, BrowserWindow, Menu, Tray } from 'electron'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
-import { initAppPaths } from './app-paths'
+import type { Logger } from 'pino'
+import { initAppPaths, type AppPaths } from './app-paths'
 import { initLogger, getLogger, attachWindowLogMirror } from './logger'
 import { AppSettingsStore } from './settings-store'
 import { SecretStore } from './secrets'
@@ -185,13 +186,72 @@ if (!gotLock) {
     }
   })
 
-  app.whenReady().then(() => {
-    const paths = initAppPaths()
-    const log = initLogger(paths.logsDir, isDev())
-    log.info(
-      { version: app.getVersion(), electron: process.versions.electron, dev: isDev() },
-      'Viking Relay starting'
-    )
+/**
+ * Headless beta -> stable downgrade for revert-to-stable.bat.
+ *
+ * Reuses the EXISTING electron-updater flow: flipping the persisted channel
+ * to stable + allowDowngrade makes it fetch latest.yml and download the
+ * older installer via its DIFFERENTIAL (blockmap) downloader - only blocks
+ * that differ from the previously downloaded installer cross the network.
+ * Runs with NO window; installs as soon as staged; never opens the UI.
+ */
+async function handleRollbackStable(log: Logger, paths: AppPaths): Promise<number> {
+  if (!app.isPackaged) {
+    // The updater only runs in packaged builds; nothing to do in dev.
+    console.log('[rollback] skipped: unpackaged dev build')
+    return 0
+  }
+
+  const store = new AppSettingsStore(paths.settingsFile, log)
+  store.update({ updateChannel: 'stable' })
+
+  console.log('[rollback] channel=stable - fetching latest stable (differential where possible)...')
+  let done = false
+  const updater = new AppUpdater(log, app.getVersion(), 'stable', () => {
+    done = true
+  })
+  void updater.check()
+
+  const deadline = Date.now() + 10 * 60_000
+  while (!done && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 500))
+  }
+  if (!done) {
+    console.error('[rollback] FAILED: could not stage the stable update in time.')
+    console.error('[rollback] manual fallback: https://github.com/Parlaxz/TorrentHub/releases/latest')
+    return 1
+  }
+
+  console.log('[rollback] stable staged - restarting into installer...')
+  updater.install() // quitAndInstall(false, true): applies + relaunches
+  return 0
+}
+
+app.whenReady().then(() => {
+  const paths = initAppPaths()
+  const log = initLogger(paths.logsDir, isDev())
+
+  // Headless rollback entry point (revert-to-stable.bat): must run BEFORE
+  // any window/backend init so a broken beta never has to open the UI.
+  if (process.argv.includes('--rollback-stable')) {
+    handleRollbackStable(log, paths)
+      .then((code) => {
+        if (!app.isPackaged) console.log(`[rollback] exit ${code}`)
+        // Deferred: app.exit() synchronously inside the ready microtask can
+        // race GPU/child teardown and die with STATUS_ACCESS_VIOLATION.
+        setTimeout(() => app.exit(code), 100)
+      })
+      .catch((err) => {
+        getLogger().error({ err }, 'rollback failed')
+        setTimeout(() => app.exit(1), 100)
+      })
+    return
+  }
+
+  log.info(
+    { version: app.getVersion(), electron: process.versions.electron, dev: isDev() },
+    'Viking Relay starting'
+  )
 
     settings = new AppSettingsStore(paths.settingsFile, log)
     const secrets = new SecretStore(paths.secretsFile, log)

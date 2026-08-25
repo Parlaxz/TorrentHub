@@ -1,12 +1,14 @@
-import { test, expect } from '@playwright/test'
+﻿import { test, expect } from '@playwright/test'
 import { spawn } from 'node:child_process'
+import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { ElectronApplication, JSHandle } from 'playwright'
 import { launchApp, type AppHandle } from './harness/app'
 import { launchServer, type ServerCluster } from './harness/cluster'
+import { makeTempUserData } from './harness/paths'
 
 /**
- * LIFE / NAV lane — docs/E2E-EXHAUSTIVE-TEST-PLAN.md §LIFE/NAV.
+ * LIFE / NAV lane â€” docs/E2E-EXHAUSTIVE-TEST-PLAN.md Â§LIFE/NAV.
  *
  * Platform-limitation pattern (win32 tray): Playwright cannot click native
  * tray menus. Tray EXISTENCE is asserted truthfully via the absence of the
@@ -32,7 +34,7 @@ async function closeAll(): Promise<void> {
   for (const a of launched) {
     try {
       // Harness gap: AppHandle.close() crashes on an already-exited process
-      // (app.process() returns undefined). Skip those — they exited cleanly
+      // (app.process() returns undefined). Skip those â€” they exited cleanly
       // by design (tray-exit / real-close paths).
       const proc = a.app.process()
       if (!proc || proc.killed || proc.exitCode !== null) continue
@@ -97,12 +99,12 @@ async function assertTrayCreated(handle: AppHandle): Promise<void> {
   const log = handle.readPersisted(logPath) ?? ''
   expect(
     log.includes('tray icon unavailable'),
-    'tray must be created on win32 — found "tray icon unavailable" warning in main log'
+    'tray must be created on win32 â€” found "tray icon unavailable" warning in main log'
   ).toBe(false)
 }
 
 /* ------------------------------------------------------------------ */
-/* LIFE-001..004 — mode chooser + header badge                         */
+/* LIFE-001..004 â€” mode chooser + header badge                         */
 
 test('LIFE-001: fresh launch shows chooser with correct versions', async () => {
   const app = await launchApp({ testId: 'LIFE-001', label: 'fresh' })
@@ -111,7 +113,8 @@ test('LIFE-001: fresh launch shows chooser with correct versions', async () => {
   await expect(app.page.getByText('Welcome to Viking Relay')).toBeVisible()
   const state = await app.getState()
   expect(state.mode).toBeNull()
-  expect(state.versions.app).toBe('0.4.3')
+  const pkgVersion = (JSON.parse(readFileSync(join(process.cwd(), 'package.json'), 'utf8')) as { version: string }).version
+  expect(state.versions.app).toBe(pkgVersion)
   expect(state.versions.electron).toMatch(/^\d+\./)
   expect(state.versions.chrome).toMatch(/^\d+\./)
   expect(state.versions.node).toMatch(/^\d+\./)
@@ -131,7 +134,7 @@ test('LIFE-003: choose Server mounts the server app (first-run wizard)', async (
   launched.push(app)
   await app.page.getByRole('button', { name: /Server PC/ }).click()
   await app.waitFor('mode switched to server', async () => (await app.getState()).mode === 'server')
-  // Server app mounted: no working folder yet ⇒ SetupWizard step 1.
+  // Server app mounted: no working folder yet â‡’ SetupWizard step 1.
   await expect(app.page.getByRole('heading', { name: 'Working folder' })).toBeVisible()
 })
 
@@ -149,7 +152,7 @@ test('LIFE-004: header badge reflects mode (unconfigured/client/server)', async 
 })
 
 /* ------------------------------------------------------------------ */
-/* LIFE-005..007 — tray residency                                      */
+/* LIFE-005..007 â€” tray residency                                      */
 
 test('LIFE-005: window close hides to tray (process alive, window hidden)', async () => {
   const app = await launchApp({ testId: 'LIFE-005', label: 'tray-hide' })
@@ -164,7 +167,7 @@ test('LIFE-005: window close hides to tray (process alive, window hidden)', asyn
   })
   expect(app.app.process().killed).toBe(false)
   expect(app.app.process().exitCode).toBeNull()
-  // Bridge still answers — the app is resident, not half-dead.
+  // Bridge still answers â€” the app is resident, not half-dead.
   expect((await app.getState()).mode).toBeNull()
 })
 
@@ -178,7 +181,7 @@ test('LIFE-006: tray Exit quits the process cleanly (covered-by-exit-flow)', asy
   launched.push(app)
   await assertTrayCreated(app)
 
-  // The quit tears the page down before the invoke reply can arrive — the
+  // The quit tears the page down before the invoke reply can arrive â€” the
   // rejection IS the success signal here; the assertion is the clean exit.
   try {
     await app.serverBridge<unknown>('requestAppExit()')
@@ -207,7 +210,7 @@ test('LIFE-007: re-show after tray hide via second-instance signal (Open Viking 
   await first.waitFor('window hidden to tray', async () => !(await windowVisible(win)))
 
   // A second instance sharing the userData dir hits the single-instance lock;
-  // the FIRST instance receives 'second-instance' → mainWindow.show().
+  // the FIRST instance receives 'second-instance' â†’ mainWindow.show().
   // Spawned directly (no Playwright loader): the second instance self-quits
   // via the lock, which tears down any Playwright attach handshake.
   const electronBinary = join(process.cwd(), 'node_modules', 'electron', 'dist', 'electron.exe')
@@ -227,9 +230,9 @@ test('LIFE-007: re-show after tray hide via second-instance signal (Open Viking 
 })
 
 /* ------------------------------------------------------------------ */
-/* LIFE-010..011 — exit confirmation + hidden launch                   */
+/* LIFE-010..011 â€” exit confirmation + hidden launch                   */
 
-test('LIFE-010: server exit button → confirm dialog; cancel keeps alive, confirm exits cleanly', async () => {
+test('LIFE-010: server exit button â†’ confirm dialog; cancel keeps alive, confirm exits cleanly', async () => {
   const cluster = await launchServer({ testId: 'LIFE-010', label: 'server', skipAutoStart: true })
   servers.push(cluster)
   const app = cluster.app
@@ -245,7 +248,7 @@ test('LIFE-010: server exit button → confirm dialog; cancel keeps alive, confi
   expect(app.app.process().exitCode).toBeNull()
   expect((await app.getState()).mode).toBe('server')
 
-  // Confirm path: "Exit anyway" → requestAppExit → quitting=true; app.quit().
+  // Confirm path: "Exit anyway" â†’ requestAppExit â†’ quitting=true; app.quit().
   // The quit can tear down the page while Playwright finishes the click's
   // post-conditions, so tolerate a closed-target error here.
   await app.page.getByTestId('exit-button').click()
@@ -275,9 +278,9 @@ test('LIFE-011: --hidden launch starts with no visible window (login-item path)'
 })
 
 /* ------------------------------------------------------------------ */
-/* NAV-001..002 — mode switching                                       */
+/* NAV-001..002 â€” mode switching                                       */
 
-test('NAV-001: client→server→client round trip preserves both backends', async () => {
+test('NAV-001: clientâ†’serverâ†’client round trip preserves both backends', async () => {
   const app = await launchApp({ testId: 'NAV-001', label: 'roundtrip' })
   launched.push(app)
 
@@ -316,8 +319,40 @@ test('NAV-002: switching during an active client screen mounts server directly (
   await app.page.getByRole('button', { name: 'Switch mode' }).click()
   await app.waitFor('server mounted', async () => (await app.getState()).mode === 'server')
 
-  // Chooser-free mount: the welcome chooser must NOT be rendered…
+  // Chooser-free mount: the welcome chooser must NOT be renderedâ€¦
   await expect(app.page.getByText('Welcome to Viking Relay')).toHaveCount(0)
-  // …and the server surface is up instead.
+  // â€¦and the server surface is up instead.
   await expect(app.page.getByRole('heading', { name: 'Working folder' })).toBeVisible()
 })
+
+test('LIFE-012: --rollback-stable runs headless and exits cleanly in dev builds', async () => {
+  // Dev/unpackaged build: the updater is disabled, so the headless rollback
+  // entry point must log its skip marker and exit 0 WITHOUT ever creating a
+  // window or touching settings.
+  const ud = makeTempUserData('rollback')
+  const electronBinary = join(process.cwd(), 'node_modules', 'electron', 'dist', 'electron.exe')
+  const child = spawn(electronBinary, ['.', '--rollback-stable', `--user-data-dir=${ud}`], {
+    cwd: process.cwd(),
+    stdio: ['ignore', 'pipe', 'pipe']
+  })
+  let stdout = ''
+  child.stdout?.on('data', (d: Buffer) => {
+    stdout += d.toString()
+  })
+  const exitCode = await new Promise<number | null>((resolve) => {
+    const t = setTimeout(() => resolve(null), 20_000)
+    child.once('exit', (code) => {
+      clearTimeout(t)
+      resolve(code)
+    })
+  })
+  expect(exitCode, 'headless rollback exits cleanly').toBe(0)
+  expect(stdout).toContain('[rollback] skipped: unpackaged dev build')
+
+  /* Packaged-behavior note: when app.isPackaged, the same flag flips
+   * updateChannel='stable' and drives the EXISTING electron-updater flow
+   * (allowDowngrade + differential/blockmap download against latest.yml),
+   * installing as soon as staged - no full-installer download when the
+   * cached previous installer can serve as the diff base. */
+})
+

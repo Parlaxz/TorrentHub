@@ -16,9 +16,11 @@ export type UpdateChannel = 'stable' | 'beta'
 export class AppUpdater {
   private readonly log: Logger
   private state: UpdateState
+  private readonly onDownloaded?: () => void
 
-  constructor(log: Logger, currentVersion: string, channel: UpdateChannel = 'stable') {
+  constructor(log: Logger, currentVersion: string, initialChannel: UpdateChannel = 'stable', onDownloaded?: () => void) {
     this.log = log
+    this.onDownloaded = onDownloaded
     this.state = {
       phase: 'idle',
       currentVersion,
@@ -26,11 +28,11 @@ export class AppUpdater {
       progressPct: null,
       error: null,
       disabled: !app.isPackaged,
-      channel,
+      channel: initialChannel,
     }
     if (this.state.disabled) return
 
-    autoUpdater.channel = channel
+    autoUpdater.channel = initialChannel
     // Required so switching beta -> stable can install the lower stable
     // version over an installed prerelease.
     autoUpdater.allowDowngrade = true
@@ -66,6 +68,7 @@ export class AppUpdater {
         availableVersion: info.version ?? this.state.availableVersion,
         progressPct: 100,
       })
+      this.onDownloaded?.()
     })
     autoUpdater.on('error', (err) => {
       const message = err instanceof Error ? err.message : String(err)
