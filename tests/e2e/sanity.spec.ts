@@ -1,11 +1,11 @@
-import { test, expect } from '@playwright/test'
+﻿import { test, expect } from '@playwright/test'
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { launchApp, type AppHandle } from './harness/app'
 
 /**
- * SANITY lane — proves the harness itself before any product suite runs.
- * Per docs/E2E-EXHAUSTIVE-TEST-PLAN.md §1.8: if these fail, STOP and fix the harness.
+ * SANITY lane â€” proves the harness itself before any product suite runs.
+ * Per docs/E2E-EXHAUSTIVE-TEST-PLAN.md Â§1.8: if these fail, STOP and fix the harness.
  */
 
 const launched: AppHandle[] = []
@@ -26,7 +26,8 @@ test('SANITY-001: launches, bridge ready, mode chooser visible, artifacts writte
   await expect(app.page.getByText('Welcome to Viking Relay')).toBeVisible()
   const state = await app.getState()
   expect(state.mode).toBeNull()
-  expect(state.versions.app).toBe('0.4.3')
+  const pkgVersion = (JSON.parse(readFileSync(join(process.cwd(), 'package.json'), 'utf8')) as { version: string }).version
+  expect(state.versions.app).toBe(pkgVersion)
   // Client + Server buttons exist
   await expect(app.page.getByRole('button', { name: /Client PC/ })).toBeVisible()
   await expect(app.page.getByRole('button', { name: /Server PC/ })).toBeVisible()
@@ -82,3 +83,4 @@ test('SANITY-004: collectors capture console errors and failed requests into art
   expect(readFileSync(consoleLog, 'utf8')).toContain('E2E-SANITY-MARKER-error')
   expect(existsSync(join(app.artifactsDir, 'failed-requests-collect.json'))).toBe(true)
 })
+

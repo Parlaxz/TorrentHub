@@ -441,13 +441,27 @@ test('FAIL-020: packaging failure → Retry Packaging fails again while obstruct
   expect(server.viking.state.sessionRequests).toBe(0) // still never reached upload
 
   // Remove the obstruction, retry #2 → packaging + upload succeed.
-  // Wait until the directory is REALLY gone: on Windows, removing a path
-  // another handle just touched can race the very next createWriteStream.
+  // Windows DELETE-PENDING race: after rmSync the path can report gone via
+  // existsSync while creation still fails with ACCESS_DENIED. Probe by
+  // actually creating + removing the path until it is genuinely reusable.
   rmSync(partialDir, { recursive: true, force: true })
   await client.app.waitFor(
-    'obstruction fully removed',
-    async () => !existsSync(partialDir),
-    { timeoutMs: 5000, pollMs: 50 }
+    'obstruction path fully released',
+    async () => {
+      try {
+        mkdirSync(partialDir, { recursive: true })
+        rmSync(partialDir, { recursive: true, force: true })
+        return true
+      } catch {
+        try {
+          rmSync(partialDir, { recursive: true, force: true })
+        } catch {
+          /* name still held */
+        }
+        return false
+      }
+    },
+    { timeoutMs: 10_000, pollMs: 100 }
   )
   await client.app.page.getByRole('button', { name: 'Retry Packaging' }).first().click()
   await expect(client.app.page.getByRole('heading', { name: 'Complete', exact: true })).toBeVisible({
