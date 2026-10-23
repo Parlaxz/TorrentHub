@@ -102,6 +102,27 @@ if ($LASTEXITCODE -ne 0) { throw "electron-builder failed." }
 $setupName = "Viking-Relay-Setup-$newVersion.exe"
 $distDir = Join-Path $repoRoot 'dist'
 
+if ($willPublish -and $Channel -eq 'stable') {
+  # Stable releases MUST also ship beta.yml: beta-channel clients resolve
+  # `<channel>.yml` from the newest release and hard-fail the update check
+  # when it is absent (0.5.0 shipped without one -> beta users 404'd).
+  # Same content as the stable feed — beta users simply track stable builds
+  # until the next beta. latest.yml is refreshed as the stable fallback.
+  $stableFeed = Join-Path $distDir 'stable.yml'
+  if (Test-Path -LiteralPath $stableFeed) {
+    Copy-Item -LiteralPath $stableFeed -Destination (Join-Path $distDir 'beta.yml') -Force
+    Copy-Item -LiteralPath $stableFeed -Destination (Join-Path $distDir 'latest.yml') -Force
+    if (Get-Command gh -ErrorAction SilentlyContinue) {
+      gh release upload "v$newVersion" (Join-Path $distDir 'beta.yml') (Join-Path $distDir 'latest.yml') --clobber
+      if ($LASTEXITCODE -ne 0) { Write-Warning "beta/latest feed upload failed; attach dist\beta.yml + dist\latest.yml to v$newVersion manually." }
+    } else {
+      Write-Warning "gh CLI not found; attach dist\beta.yml + dist\latest.yml to v$newVersion manually."
+    }
+  } else {
+    Write-Warning "dist\stable.yml missing after build; beta-channel clients will 404 until beta.yml is attached to v$newVersion."
+  }
+}
+
 if ($willPublish) {
   # 3. Tag the release commit state.
   git tag "v$newVersion"

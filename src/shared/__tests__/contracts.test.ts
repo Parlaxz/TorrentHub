@@ -210,6 +210,14 @@ describe('settings contract', () => {
     expect(settings.serverPort).toBe(47821)
   })
 
+  it('defaults fresh installs to the stable update channel', () => {
+    expect(DEFAULT_SETTINGS.updateChannel).toBe('stable')
+    // Pre-channel settings files backfill to stable on parse.
+    const { updateChannel, ...withoutChannel } = DEFAULT_SETTINGS
+    void updateChannel
+    expect(AppSettingsSchema.parse(withoutChannel).updateChannel).toBe('stable')
+  })
+
   it('accepts partial patches only', () => {
     expect(AppSettingsPatchSchema.safeParse({ mode: 'client' }).success).toBe(true)
     expect(AppSettingsPatchSchema.safeParse({ mode: 'router' }).success).toBe(false)

@@ -10,8 +10,9 @@ import { app } from 'electron'
 import { autoUpdater } from 'electron-updater'
 import type { Logger } from 'pino'
 import type { UpdateState } from '@shared/ipc'
+import { allowPrereleaseFor, type UpdateChannel } from './update-channel'
 
-export type UpdateChannel = 'stable' | 'beta'
+export type { UpdateChannel }
 
 export class AppUpdater {
   private readonly log: Logger
@@ -33,6 +34,10 @@ export class AppUpdater {
     if (this.state.disabled) return
 
     autoUpdater.channel = initialChannel
+    // Beta tracks prereleases AND tolerates a missing beta.yml (falls back
+    // to the stable feed instead of hard-failing the check). Stable stays
+    // strict: only final releases, no fallback.
+    autoUpdater.allowPrerelease = allowPrereleaseFor(initialChannel)
     // Required so switching beta -> stable can install the lower stable
     // version over an installed prerelease.
     autoUpdater.allowDowngrade = true
@@ -110,6 +115,7 @@ export class AppUpdater {
     this.set({ channel })
     if (!this.state.disabled) {
       autoUpdater.channel = channel
+      autoUpdater.allowPrerelease = allowPrereleaseFor(channel)
       await this.check()
     }
     return this.getState()
