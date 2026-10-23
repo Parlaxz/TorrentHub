@@ -16,7 +16,7 @@
     "lint": "eslint .",
     "test": "vitest run",
     "test:node": "node --test \"tests/jobs/*.test.ts\" \"tests/package/*.test.ts\" \"tests/storage/*.test.ts\"",
-    "test:auth-relay": "tsx --test tests/auth/pairing.test.ts tests/auth/ratelimit.test.ts tests/auth/tokenStore.test.ts tests/relay/adapters.test.ts tests/relay/lifecycle.test.ts tests/relay/server.test.ts",
+    "test:auth-relay": "tsx --test tests/auth/pairing.test.ts tests/auth/ratelimit.test.ts tests/auth/tokenStore.test.ts tests/relay/adapters.test.ts tests/relay/lifecycle.test.ts tests/relay/server.test.ts tests/relay/direct-jobs-status.test.ts",
     "test:integration": "tsx --test \"tests/integration/*.test.ts\"",
     "test:qbit": "node scripts/run-qbit-tests.mjs",
     "test:viking": "node tests/viking/run.mjs",

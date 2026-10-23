@@ -5,6 +5,7 @@ import type { RelayAppDeps } from "./app.js";
 import { ServiceError } from "./errors.js";
 import {
   formatIssues,
+  directJobReportSchema,
   historyQuerySchema,
   idParamSchema,
   intakeCreateSchema,
@@ -197,6 +198,69 @@ export function registerRoutes(app: FastifyInstance, deps: RelayAppDeps): void {
     api.get("/direct-jobs", async (req) => {
       if (!deps.directJobs) return { jobs: [] };
       return { jobs: await deps.directJobs.queuedFor(req.client!.clientId) };
+    });
+
+    // Static route first: Fastify prefers static over parametric, but keep
+    // the registration order explicit so "/sent" never lands in ":id".
+
+    /** Jobs THIS client sent — on-demand sender status ("ping the queue, not the friend"). */
+    api.get("/direct-jobs/sent", async (req) => {
+      if (!deps.directJobs?.sentBy) return { jobs: [] };
+      const jobs = await deps.directJobs.sentBy(req.client!.clientId);
+      // The sender already knows the link it sent; don't echo it back.
+      return {
+        jobs: jobs.map((j) => ({
+          id: j.id,
+          targetClientId: j.targetClientId,
+          targetName: j.targetName,
+          state: j.state,
+          progress: j.progress ?? null,
+          createdAt: j.createdAt,
+          updatedAt: j.updatedAt,
+        })),
+      };
+    });
+
+    /**
+     * Single direct-job status for one participant (sender OR receiver).
+     * Anything else 404s — no cross-tenant oracle.
+     */
+    api.get("/direct-jobs/:id", async (req) => {
+      const id = requireId(req);
+      const job = await deps.directJobs?.getById?.(id);
+      const self = req.client!.clientId;
+      if (!job || (job.targetClientId !== self && job.fromClientId !== self)) {
+        throw new ServiceError(404, "not_found", `no direct job ${id}`);
+      }
+      return {
+        id: job.id,
+        targetClientId: job.targetClientId,
+        targetName: job.targetName,
+        fromName: job.fromName,
+        state: job.state,
+        progress: job.progress ?? null,
+        createdAt: job.createdAt,
+        updatedAt: job.updatedAt,
+      };
+    });
+
+    /**
+     * Receiver-reported download progress (% + speed). ONLY the receiving
+     * client may report; the sender (or anyone else) gets a plain 404.
+     * Called by the receiver on its own poll cycle — the sender only reads.
+     */
+    api.post("/direct-jobs/:id/report", async (req, reply) => {
+      const id = requireId(req);
+      const parsed = directJobReportSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return reply.code(400).send({ error: "validation_error", issues: formatIssues(parsed.error) });
+      }
+      if (!deps.directJobs?.reportProgress) {
+        return reply.code(503).send({ error: "unavailable", message: "direct jobs disabled" });
+      }
+      const job = await deps.directJobs.reportProgress(id, parsed.data, req.client!.clientId);
+      if (!job) throw new ServiceError(404, "not_found", `no direct job ${id}`);
+      return { ok: true };
     });
 
     api.post("/direct-jobs/:id/accept", async (req) => {

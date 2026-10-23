@@ -43,6 +43,31 @@ export interface StoragePreflight {
 
 export type BridgeResult<T> = { ok: true; value: T } | { ok: false; error: string }
 
+/** A saved friend: paired-client identity plus an optional local nickname. */
+export interface Friend {
+  clientId: string
+  name: string
+  alias?: string
+}
+
+/** Sender-side view of a link previously sent to a friend (no link echo). */
+export interface SentDirectJobStatus {
+  id: string
+  targetClientId: string
+  targetName: string
+  state: string
+  /** Last receiver-reported progress; null until the first report lands. */
+  progress: {
+    progressPct: number | null
+    dlSpeedBps: number | null
+    downloadedBytes: number | null
+    totalBytes: number | null
+    updatedAt: string
+  } | null
+  createdAt: string
+  updatedAt: string
+}
+
 export interface HistoryEntry {
   id: string
   name: string
@@ -313,21 +338,61 @@ export class ClientRelayService {
     }
   }
 
-  getFriends(): Array<{ clientId: string; name: string }> {
+  /** Links THIS client sent — newest first. On-demand only; never polled. */
+  async listSentDirectJobs(): Promise<SentDirectJobStatus[]> {
+    const response = await this.authed<{ jobs: SentDirectJobStatus[] }>(
+      'GET',
+      ApiRoutes.directJobsSent,
+    )
+    return response.jobs
+  }
+
+  /** One-shot status check for a single sent link (the "ping"). */
+  async getDirectJobStatus(id: string): Promise<SentDirectJobStatus> {
+    return this.authed<SentDirectJobStatus>('GET', ApiRoutes.directJobById(id))
+  }
+
+  getFriends(): Friend[] {
     return this.settings.get().friends
   }
 
-  addFriend(friend: { clientId: string; name: string }): Array<{ clientId: string; name: string }> {
-    const current = this.settings.get().friends
+  addFriend(friend: { clientId: string; name: string }): Friend[] {
+    const current: Friend[] = this.settings.get().friends
     if (!current.some((f) => f.clientId === friend.clientId)) {
       this.settings.update({ friends: [...current, friend] })
     }
     return this.getFriends()
   }
 
-  removeFriend(clientId: string): Array<{ clientId: string; name: string }> {
+  /**
+   * Rename a friend locally (nickname). Empty/blank clears back to the
+   * paired client name. 1..32 chars; returns the updated list.
+   */
+  renameFriend(clientId: string, alias: string): BridgeResult<Friend[]> {
+    const nickname = alias.trim()
+    if (nickname.length > 32) {
+      return { ok: false, error: 'nicknames are at most 32 characters' }
+    }
+    const current: Friend[] = this.settings.get().friends
+    if (!current.some((f) => f.clientId === clientId)) {
+      return { ok: false, error: 'that friend is no longer in your list' }
+    }
     this.settings.update({
-      friends: this.settings.get().friends.filter((f) => f.clientId !== clientId),
+      friends: current.map((f) =>
+        f.clientId === clientId
+          ? nickname.length > 0
+            ? { ...f, alias: nickname }
+            : { clientId: f.clientId, name: f.name }
+          : f,
+      ),
+    })
+    return { ok: true, value: this.getFriends() }
+  }
+
+  removeFriend(clientId: string): Friend[] {
+    const friends: Friend[] = this.settings.get().friends
+    this.settings.update({
+      friends: friends.filter((f) => f.clientId !== clientId),
     })
     return this.getFriends()
   }

@@ -17,7 +17,7 @@ declare global {
       openLogsFolder(): Promise<boolean>
       getDirectDownloadsState(): Promise<{
         settings: { autoAccept: boolean; qbitUrl: string; qbitKeySet: boolean; downloadDir: string | null }
-        queue: Array<{ id: string; source: string; sourceKind: string; state: string; error?: string | null }>
+        queue: Array<{ id: string; source: string; sourceKind: string; state: string; error?: string | null; torrentHash?: string | null; progressPct?: number | null; dlSpeedBps?: number | null; downloadedBytes?: number | null; totalBytes?: number | null; progressAt?: string | null }>
       }>
       setDirectDownloadSettings(patch: { autoAccept?: boolean; qbitUrl?: string; qbitKey?: string; downloadDir?: string | null }): Promise<void>
       acceptDirectDownload(id: string): Promise<void>
@@ -40,10 +40,14 @@ declare global {
       listHistory(): Promise<Array<Record<string, unknown>>>
       clientsList(): Promise<Array<Record<string, unknown>>>
       sendToFriend(source: string, targetClientId: string): Promise<unknown>
-      friendsGet(): Promise<Array<{ clientId: string; name: string }>>
+      friendsGet(): Promise<Array<{ clientId: string; name: string; alias?: string }>>
       friendsAdd(friend: { clientId: string; name: string }): Promise<unknown>
+      friendsRename(clientId: string, alias: string): Promise<unknown>
       friendsRemove(clientId: string): Promise<unknown>
+      directJobsSent(): Promise<Array<Record<string, unknown>>>
+      directJobStatus(id: string): Promise<Record<string, unknown>>
       copyText(text: string): Promise<boolean>
+      readText(): Promise<string>
     }
     vikingRelayServer: Record<string, (...args: unknown[]) => Promise<unknown>> & {
       getHealth(): Promise<Record<string, unknown>>

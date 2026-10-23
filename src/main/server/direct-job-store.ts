@@ -10,6 +10,15 @@ import { dirname } from 'node:path';
 
 export type DirectJobState = 'queued' | 'accepted' | 'declined';
 
+/** Last progress snapshot reported by the RECEIVING client (its own qBittorrent). */
+export interface DirectJobProgress {
+  progressPct: number | null;
+  dlSpeedBps: number | null;
+  downloadedBytes: number | null;
+  totalBytes: number | null;
+  updatedAt: string;
+}
+
 export interface DirectJob {
   id: string;
   source: string;
@@ -20,6 +29,8 @@ export interface DirectJob {
   fromClientId: string;
   fromName: string;
   state: DirectJobState;
+  /** Receiver-reported download progress; null until the first report lands. */
+  progress?: DirectJobProgress | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -86,6 +97,18 @@ export class DirectJobStore {
     return (await this.load()).filter((j) => j.targetClientId === clientId && j.state === 'queued');
   }
 
+  /** Jobs this client sent (newest first) — the sender's on-demand status view. */
+  async sentBy(clientId: string): Promise<DirectJob[]> {
+    return (await this.load())
+      .filter((j) => j.fromClientId === clientId)
+      .slice()
+      .reverse(); // newest first
+  }
+
+  async getById(id: string): Promise<DirectJob | null> {
+    return (await this.load()).find((j) => j.id === id) ?? null;
+  }
+
   async setState(id: string, state: Exclude<DirectJobState, 'queued'>): Promise<DirectJob | null> {
     const jobs = await this.load();
     const job = jobs.find((j) => j.id === id);
@@ -95,4 +118,44 @@ export class DirectJobStore {
     await this.save(jobs);
     return job;
   }
+
+  /**
+   * Records a download-progress snapshot for a job. ONLY the receiving
+   * client (targetClientId) may report — anyone else gets null (the route
+   * maps that to 404, so there is no cross-tenant oracle). Numbers are
+   * clamped/sanitized; garbage becomes null rather than a throw.
+   */
+  async reportProgress(
+    id: string,
+    report: {
+      progressPct?: number | null;
+      dlSpeedBps?: number | null;
+      downloadedBytes?: number | null;
+      totalBytes?: number | null;
+    },
+    reporterClientId: string,
+  ): Promise<DirectJob | null> {
+    const jobs = await this.load();
+    const job = jobs.find((j) => j.id === id);
+    if (!job || job.targetClientId !== reporterClientId) return null;
+    job.progress = {
+      progressPct: clampPct(report.progressPct),
+      dlSpeedBps: clampNonNegativeInt(report.dlSpeedBps),
+      downloadedBytes: clampNonNegativeInt(report.downloadedBytes),
+      totalBytes: clampNonNegativeInt(report.totalBytes),
+      updatedAt: new Date().toISOString(),
+    };
+    await this.save(jobs);
+    return job;
+  }
+}
+
+function clampPct(value: number | null | undefined): number | null {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return null;
+  return Math.min(100, Math.max(0, Math.round(value * 10) / 10));
+}
+
+function clampNonNegativeInt(value: number | null | undefined): number | null {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) return null;
+  return Math.floor(value);
 }

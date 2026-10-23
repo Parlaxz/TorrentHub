@@ -1,6 +1,7 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { Button, ErrorText, Panel, SectionTitle, StatusDot } from "../components/ui";
-import type { ConnectionStatus, VikingBridge } from "../lib/bridge";
+import type { ConnectionStatus, Friend, SentDirectJobStatus, VikingBridge } from "../lib/bridge";
+import { formatPercent, formatSpeed } from "../lib/format";
 
 const MAGNET_RE = /^magnet:\?xt=urn:btih:[a-z0-9]{32,}/i;
 const URL_RE = /^https?:\/\/\S+$/i;
@@ -31,7 +32,7 @@ export function HomeScreen({
   const [value, setValue] = useState("");
   const [localError, setLocalError] = useState<string | null>(null);
 
-  const [friends, setFriends] = useState<Array<{ clientId: string; name: string }>>([]);
+  const [friends, setFriends] = useState<Friend[]>([]);
   const [showAdd, setShowAdd] = useState(false);
   const [available, setAvailable] = useState<Array<{ clientId: string; name: string }>>([]);
   const [pickId, setPickId] = useState("");
@@ -40,6 +41,23 @@ export function HomeScreen({
   const [friendMsg, setFriendMsg] = useState<string | null>(null);
   const [friendError, setFriendError] = useState<string | null>(null);
   const [friendBusy, setFriendBusy] = useState(false);
+  const [pasteBusy, setPasteBusy] = useState(false);
+
+  // Inline nickname editing (local alias; the paired client name is kept).
+  const [renamingId, setRenamingId] = useState<string | null>(null);
+  const [renameDraft, setRenameDraft] = useState("");
+  const [renameBusy, setRenameBusy] = useState(false);
+
+  // Sender-side "ping": links sent this session + last on-demand status.
+  // Fetched ONLY when the user clicks Check — never polled.
+  interface SentEntry {
+    id: string;
+    targetName: string;
+    sourcePreview: string;
+    status: SentDirectJobStatus | null;
+    checking: boolean;
+  }
+  const [sentEntries, setSentEntries] = useState<SentEntry[]>([]);
 
   useEffect(() => {
     if (!bridge) return;
@@ -89,6 +107,48 @@ export function HomeScreen({
     if (sendTarget === clientId) setSendTarget("");
   };
 
+  const displayName = (f: Friend): string => f.alias ?? f.name;
+
+  const startRename = (f: Friend): void => {
+    setRenamingId(f.clientId);
+    setRenameDraft(f.alias ?? "");
+    setFriendMsg(null);
+    setFriendError(null);
+  };
+
+  const saveRename = async (): Promise<void> => {
+    if (!bridge || !renamingId) return;
+    setRenameBusy(true);
+    try {
+      const res = await bridge.friendsRename(renamingId, renameDraft);
+      if (res.ok) {
+        setFriends(res.value);
+        setRenamingId(null);
+        setRenameDraft("");
+      } else {
+        setFriendError(res.error);
+      }
+    } finally {
+      setRenameBusy(false);
+    }
+  };
+
+  const pasteClipboard = async (): Promise<void> => {
+    if (!bridge) return;
+    setPasteBusy(true);
+    setFriendError(null);
+    try {
+      const text = (await bridge.readText()).trim();
+      if (!text) {
+        setFriendError("Clipboard is empty — copy a magnet link or torrent URL first.");
+        return;
+      }
+      setFriendLink(text);
+    } finally {
+      setPasteBusy(false);
+    }
+  };
+
   const sendToFriend = async (): Promise<void> => {
     if (!bridge || !sendTarget) return;
     const invalid = validateIntakeInput(friendLink);
@@ -99,17 +159,71 @@ export function HomeScreen({
     setFriendError(null);
     setFriendBusy(true);
     try {
-      const res = await bridge.sendToFriend(friendLink.trim(), sendTarget);
+      const target = friends.find((f) => f.clientId === sendTarget);
+      const source = friendLink.trim();
+      const res = await bridge.sendToFriend(source, sendTarget);
       if (res.ok) {
         setFriendLink("");
         setFriendMsg("Sent ✓");
         window.setTimeout(() => setFriendMsg(null), 2500);
+        const preview = source.length > 64 ? `${source.slice(0, 64)}…` : source;
+        setSentEntries((prev) =>
+          [
+            {
+              id: res.value.id,
+              targetName: target ? displayName(target) : sendTarget,
+              sourcePreview: preview,
+              status: null,
+              checking: false,
+            },
+            ...prev,
+          ].slice(0, 10),
+        );
       } else {
         setFriendError(res.error);
       }
     } finally {
       setFriendBusy(false);
     }
+  };
+
+  /** On-demand "ping": one status fetch per click, never polled. */
+  const checkSentStatus = async (id: string): Promise<void> => {
+    if (!bridge) return;
+    setSentEntries((prev) => prev.map((e) => (e.id === id ? { ...e, checking: true } : e)));
+    try {
+      const status = await bridge.directJobStatus(id);
+      setSentEntries((prev) =>
+        prev.map((e) => (e.id === id ? { ...e, status, checking: false } : e)),
+      );
+    } catch {
+      setSentEntries((prev) => prev.map((e) => (e.id === id ? { ...e, checking: false } : e)));
+      setFriendError("Could not reach the server for that status check.");
+    }
+  };
+
+  const describeSentState = (status: SentDirectJobStatus): string => {
+    if (status.state === "queued") return "Waiting — your friend hasn't opened it yet";
+    if (status.state === "declined") return "Declined by your friend";
+    if (status.state !== "accepted") return status.state;
+    const p = status.progress;
+    if (p?.progressPct != null && p.progressPct >= 100) return "Complete ✓ — 100% on your friend's PC";
+    if (p?.progressPct != null) {
+      const age = ageAgo(p.updatedAt);
+      return `Downloading — ${formatPercent(p.progressPct)} • ${formatSpeed(p.dlSpeedBps)}${age ? ` • ${age}` : ""}`;
+    }
+    return "Received ✓ — download started on your friend's PC";
+  };
+
+  const ageAgo = (iso: string): string => {
+    const ms = Date.now() - new Date(iso).getTime();
+    if (!Number.isFinite(ms) || ms < 0) return "";
+    const s = Math.floor(ms / 1000);
+    if (s < 5) return "just now";
+    if (s < 60) return `${s}s ago`;
+    const m = Math.floor(s / 60);
+    if (m < 60) return `${m}m ago`;
+    return `${Math.floor(m / 60)}h ago`;
   };
 
   return (
@@ -190,13 +304,24 @@ export function HomeScreen({
                       ? "border-blue-500 bg-blue-50 text-blue-700 dark:border-blue-700 dark:bg-blue-950/40 dark:text-blue-300"
                       : "border-zinc-300 text-zinc-600 dark:border-zinc-700 dark:text-zinc-400"
                   }`}
+                  title={f.alias ? `Paired as ${f.name}` : undefined}
                 >
                   <button type="button" onClick={() => setSendTarget(f.clientId)} data-testid={`friend-${f.clientId}`}>
-                    {f.name}
+                    {displayName(f)}
                   </button>
                   <button
                     type="button"
-                    aria-label={`Remove ${f.name}`}
+                    aria-label={`Rename ${displayName(f)}`}
+                    title="Give this friend a nickname"
+                    className="text-zinc-400 hover:text-blue-500"
+                    onClick={() => startRename(f)}
+                    data-testid={`friend-rename-${f.clientId}`}
+                  >
+                    ✎
+                  </button>
+                  <button
+                    type="button"
+                    aria-label={`Remove ${displayName(f)}`}
                     className="text-zinc-400 hover:text-red-500"
                     onClick={() => removeFriend(f.clientId)}
                   >
@@ -205,6 +330,37 @@ export function HomeScreen({
                 </span>
               ))}
             </div>
+
+            {renamingId ? (
+              <div className="flex gap-2" data-testid="friend-rename-panel">
+                <input
+                  value={renameDraft}
+                  onChange={(e) => setRenameDraft(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") void saveRename();
+                    if (e.key === "Escape") setRenamingId(null);
+                  }}
+                  placeholder="Nickname (blank = paired name)"
+                  aria-label="Friend nickname"
+                  maxLength={32}
+                  autoComplete="off"
+                  spellCheck={false}
+                  disabled={renameBusy}
+                  className="min-w-0 flex-1 rounded-md border border-zinc-300 bg-white px-3 py-1.5 text-[13px] text-zinc-900 shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500/60 disabled:opacity-60 dark:bg-zinc-900 dark:text-zinc-100 dark:border-zinc-700"
+                  data-testid={`friend-rename-input-${renamingId}`}
+                />
+                <Button
+                  onClick={() => void saveRename()}
+                  disabled={renameBusy}
+                  data-testid={`friend-rename-save-${renamingId}`}
+                >
+                  Save
+                </Button>
+                <Button variant="ghost" onClick={() => setRenamingId(null)} disabled={renameBusy}>
+                  Cancel
+                </Button>
+              </div>
+            ) : null}
 
             <div className="flex gap-2">
               <input
@@ -219,6 +375,15 @@ export function HomeScreen({
                 data-testid="friend-link-input"
               />
               <Button
+                variant="ghost"
+                onClick={() => void pasteClipboard()}
+                disabled={pasteBusy || state !== "connected"}
+                data-testid="friend-paste"
+                title="Paste from clipboard"
+              >
+                Paste
+              </Button>
+              <Button
                 onClick={() => void sendToFriend()}
                 disabled={friendBusy || state !== "connected" || !sendTarget}
                 data-testid="send-to-friend"
@@ -231,6 +396,37 @@ export function HomeScreen({
             ) : null}
             {friendMsg ? <p className="text-xs text-emerald-600 dark:text-emerald-400">{friendMsg}</p> : null}
             {friendError ? <ErrorText>{friendError}</ErrorText> : null}
+            {sentEntries.length > 0 ? (
+              <div className="space-y-1.5 border-t border-zinc-200 pt-2 dark:border-zinc-800" data-testid="friend-sent-list">
+                <p className="text-[11px] font-semibold uppercase tracking-widest text-zinc-400 dark:text-zinc-500">
+                  Sent — check status on demand
+                </p>
+                {sentEntries.map((e) => (
+                  <div key={e.id} className="flex items-center gap-2 text-xs">
+                    <span className="min-w-0 flex-1 truncate font-mono text-zinc-500 dark:text-zinc-400" title={e.sourcePreview}>
+                      → {e.targetName}: {e.sourcePreview}
+                    </span>
+                    <span className="shrink-0 text-zinc-600 dark:text-zinc-300" data-testid={`friend-status-${e.id}`}>
+                      {e.status ? describeSentState(e.status) : "Sent — not checked yet"}
+                    </span>
+                    <Button
+                      variant="ghost"
+                      className="shrink-0 px-2 py-0.5 text-xs"
+                      onClick={() => void checkSentStatus(e.id)}
+                      disabled={e.checking || state !== "connected"}
+                      data-testid={`friend-status-check-${e.id}`}
+                    >
+                      {e.checking ? "Checking…" : "Check"}
+                    </Button>
+                  </div>
+                ))}
+                <p className="text-[11px] text-zinc-400 dark:text-zinc-600">
+                  Status is fetched only when you press Check — never polled. Percent and
+                  speed come from your friend's app (magnet links only); if they're offline
+                  you'll see the last report they sent.
+                </p>
+              </div>
+            ) : null}
           </div>
         )}
 

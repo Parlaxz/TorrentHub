@@ -42,6 +42,31 @@ export interface PairParams {
 
 export type BridgeResult<T> = { ok: true; value: T } | { ok: false; error: string };
 
+/** A saved friend: paired-client identity plus an optional local nickname. */
+export interface Friend {
+  clientId: string;
+  name: string;
+  alias?: string;
+}
+
+/** Sender-side view of a link previously sent to a friend (no link echo). */
+export interface SentDirectJobStatus {
+  id: string;
+  targetClientId: string;
+  targetName: string;
+  state: string;
+  /** Last receiver-reported progress; null until the first report lands. */
+  progress: {
+    progressPct: number | null;
+    dlSpeedBps: number | null;
+    downloadedBytes: number | null;
+    totalBytes: number | null;
+    updatedAt: string;
+  } | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface VikingBridge {
   /** Saved server connection (host/port only — tokens stay in main). */
   getConnection(): Promise<SavedConnection | null>;
@@ -76,6 +101,9 @@ export interface VikingBridge {
   /** Safe clipboard write exposed by preload. Returns false if unavailable. */
   copyText(text: string): Promise<boolean>;
 
+  /** Clipboard read via the main process. Returns '' when unavailable/empty. */
+  readText(): Promise<string>;
+
   /** Other paired clients on the server (potential friends). */
   clientsList(): Promise<Array<{ clientId: string; name: string }>>;
   /** Client-to-client: send a link to another paired client's queue. */
@@ -83,9 +111,14 @@ export interface VikingBridge {
     source: string,
     targetClientId: string,
   ): Promise<BridgeResult<{ id: string }>>;
-  friendsGet(): Promise<Array<{ clientId: string; name: string }>>;
-  friendsAdd(friend: { clientId: string; name: string }): Promise<Array<{ clientId: string; name: string }>>;
-  friendsRemove(clientId: string): Promise<Array<{ clientId: string; name: string }>>;
+  friendsGet(): Promise<Friend[]>;
+  friendsAdd(friend: { clientId: string; name: string }): Promise<Friend[]>;
+  friendsRename(clientId: string, alias: string): Promise<BridgeResult<Friend[]>>;
+  friendsRemove(clientId: string): Promise<Friend[]>;
+  /** Links this client sent (newest first). Call on demand — never polled. */
+  directJobsSent(): Promise<SentDirectJobStatus[]>;
+  /** One-shot status check for a single sent link. */
+  directJobStatus(id: string): Promise<SentDirectJobStatus>;
 }
 
 /**

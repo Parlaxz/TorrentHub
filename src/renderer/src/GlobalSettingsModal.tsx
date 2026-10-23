@@ -6,9 +6,41 @@
 import { useEffect, useRef, useState } from 'react'
 import type { UpdateState } from '@shared/ipc'
 
+interface DdQueueItem {
+  id: string
+  source: string
+  sourceKind: string
+  state: string
+  error?: string | null
+  progressPct?: number | null
+  dlSpeedBps?: number | null
+}
+
 interface DdState {
   settings: { autoAccept: boolean; qbitUrl: string; qbitKeySet: boolean; downloadDir: string | null }
-  queue: Array<{ id: string; source: string; sourceKind: string; state: string; error?: string | null }>
+  queue: DdQueueItem[]
+}
+
+/** "42% • 1.2 MB/s" style; empty when no progress snapshot exists yet. */
+function formatProgress(item: DdQueueItem): string {
+  if (item.progressPct == null || !Number.isFinite(item.progressPct)) return ''
+  const pct = `${Math.floor(Math.max(0, Math.min(100, item.progressPct)))}%`
+  const speed = typeof item.dlSpeedBps === 'number' && Number.isFinite(item.dlSpeedBps)
+    ? ` • ${formatSpeedShort(item.dlSpeedBps)}`
+    : ''
+  return ` — ${pct}${speed}`
+}
+
+function formatSpeedShort(bps: number): string {
+  const v = Math.max(0, bps)
+  if (v >= 1024 * 1024) return `${trim1(v / (1024 * 1024))} MB/s`
+  if (v >= 1024) return `${trim1(v / 1024)} KB/s`
+  return `${Math.round(v)} B/s`
+}
+
+function trim1(n: number): string {
+  const r = Math.round(n * 10) / 10
+  return Number.isInteger(r) ? String(r) : r.toFixed(1)
 }
 
 export function GlobalSettingsModal({
@@ -408,6 +440,7 @@ export function GlobalSettingsModal({
                       <p className="truncate font-mono text-neutral-300">{item.source}</p>
                       <p className="mt-0.5 text-neutral-500">
                         {item.state}
+                        {formatProgress(item)}
                         {item.error ? ` — ${item.error}` : ''}
                       </p>
                       {item.state === 'pending' ? (

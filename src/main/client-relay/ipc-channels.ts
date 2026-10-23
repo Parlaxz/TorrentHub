@@ -15,9 +15,13 @@ export const ClientIpc = {
   retryStorageCheck: 'client:retryStorageCheck',
   listHistory: 'client:listHistory',
   copyText: 'client:copyText',
+  readText: 'client:readText',
   clientsList: 'client:clientsList',
   sendToFriend: 'client:sendToFriend',
   friendsGet: 'client:friendsGet',
   friendsAdd: 'client:friendsAdd',
-  friendsRemove: 'client:friendsRemove'
+  friendsRename: 'client:friendsRename',
+  friendsRemove: 'client:friendsRemove',
+  directJobsSent: 'client:directJobsSent',
+  directJobStatus: 'client:directJobStatus'
 } as const

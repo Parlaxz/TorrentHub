@@ -23,6 +23,9 @@ export const ApiRoutes = {
   serverStatus: '/v1/server/status',
   clients: '/v1/clients',
   directJobs: '/v1/direct-jobs',
+  directJobsSent: '/v1/direct-jobs/sent',
+  directJobById: (id: string): string => `/v1/direct-jobs/${encodeURIComponent(id)}`,
+  directJobReport: (id: string): string => `/v1/direct-jobs/${encodeURIComponent(id)}/report`,
   directJobAction: (id: string, action: 'accept' | 'decline'): string =>
     `/v1/direct-jobs/${encodeURIComponent(id)}/${action}`
 } as const

@@ -13,6 +13,9 @@ No decorative testids. Every mapping below is product-semantic.
 | `direct-downloads-section`, `dd-auto-accept`, `dd-qbit-url`, `dd-qbit-key`, `dd-download-dir`, `dd-save`, `dd-refresh`, `dd-empty`, `dd-queue`, `dd-item-<id>`, `dd-accept-<id>`, `dd-decline-<id>` | client receiver inbox |
 | `open-logs-folder` | logs folder button |
 | `add-friend`, `add-friend-confirm`, `friend-<clientId>` | client friends |
+| `friend-rename-<clientId>`, `friend-rename-panel`, `friend-rename-input-<clientId>`, `friend-rename-save-<clientId>` | friend nickname editing |
+| `friend-paste` | paste clipboard into the friend link input |
+| `friend-sent-list`, `friend-status-<directJobId>`, `friend-status-check-<directJobId>` | on-demand sent-link status |
 | `open-page-link`, `open-direct-link` | CompleteScreen external opens |
 | `pair-client`, `send-to-friend`, `open-settings`, `exit-button`, `exit-cancel`, `exit-confirm` | server dashboard |
 | `pairing-regenerate` | pairing modal |

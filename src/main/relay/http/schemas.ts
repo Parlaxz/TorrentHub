@@ -55,6 +55,14 @@ export const historyQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(500).optional(),
 });
 
+/** Receiver-reported download progress for one direct job. All fields optional; null clears. */
+export const directJobReportSchema = z.strictObject({
+  progressPct: z.number().min(0).max(100).nullable().optional(),
+  dlSpeedBps: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).nullable().optional(),
+  downloadedBytes: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).nullable().optional(),
+  totalBytes: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).nullable().optional(),
+});
+
 export function formatIssues(error: z.ZodError): Array<{ path: string; message: string }> {
   return error.issues.map((issue) => ({
     path: issue.path.map(String).join("."),

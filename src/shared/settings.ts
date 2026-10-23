@@ -50,7 +50,14 @@ export const AppSettingsSchema = z.object({
   clientQbitUrl: z.string().min(1).default('http://127.0.0.1:8080'),
   /** Client mode: saved friends (other paired clients) for direct sends. */
   friends: z
-    .array(z.object({ clientId: z.string().min(1), name: z.string().min(1) }))
+    .array(
+      z.object({
+        clientId: z.string().min(1),
+        name: z.string().min(1),
+        /** User-chosen nickname shown in place of the paired client name. */
+        alias: z.string().min(1).max(32).optional(),
+      }),
+    )
     .default([]),
   /** Closing the window hides to tray instead of exiting (default on). */
   minimizeToTrayOnClose: z.boolean().default(true),
@@ -88,7 +95,13 @@ export const AppSettingsPatchSchema = z.object({
     })
     .optional(),
   friends: z
-    .array(z.object({ clientId: z.string().min(1), name: z.string().min(1) }))
+    .array(
+      z.object({
+        clientId: z.string().min(1),
+        name: z.string().min(1),
+        alias: z.string().min(1).max(32).optional(),
+      }),
+    )
     .optional(),
   minimizeToTrayOnClose: z.boolean().optional(),
   updateChannel: z.enum(['stable', 'beta']).optional()

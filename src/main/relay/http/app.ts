@@ -42,7 +42,51 @@ export interface RelayAppDeps {
       }>
     >;
     setState(id: string, state: "accepted" | "declined"): Promise<unknown>;
+    sentBy?(clientId: string): Promise<
+      Array<{
+        id: string;
+        source: string;
+        targetClientId: string;
+        targetName: string;
+        fromClientId: string;
+        state: string;
+        progress?: DirectJobProgressView | null;
+        createdAt: string;
+        updatedAt: string;
+      }>
+    >;
+    getById?(id: string): Promise<{
+      id: string;
+      source: string;
+      targetClientId: string;
+      targetName: string;
+      fromClientId: string;
+      fromName: string;
+      state: string;
+      progress?: DirectJobProgressView | null;
+      createdAt: string;
+      updatedAt: string;
+    } | null>;
+    reportProgress?(
+      id: string,
+      report: {
+        progressPct?: number | null;
+        dlSpeedBps?: number | null;
+        downloadedBytes?: number | null;
+        totalBytes?: number | null;
+      },
+      reporterClientId: string,
+    ): Promise<unknown>;
   } | null;
+}
+
+/** Receiver-reported download progress, as served to the sender on demand. */
+export interface DirectJobProgressView {
+  progressPct: number | null;
+  dlSpeedBps: number | null;
+  downloadedBytes: number | null;
+  totalBytes: number | null;
+  updatedAt: string;
 }
 
 export const DEFAULT_BODY_LIMIT_BYTES = 128 * 1024;

@@ -12,6 +12,7 @@ import type { AppSettingsStore } from '../settings-store';
 import type { SecretStore } from '../secrets';
 import { ApiRoutes } from '@shared/api';
 import { HttpDirectDownloadGateway } from '../integration/direct-gateway';
+import { parseTorrentSource } from '../qbit/magnet';
 import { QbitTorrentService } from '../qbit/service';
 import type { Logger } from 'pino';
 import type { ClientRelayService } from './service';
@@ -26,6 +27,22 @@ export interface DirectDownloadItem {
   state: 'pending' | 'downloading' | 'done' | 'failed' | 'declined';
   error?: string | null;
   createdAt: string;
+  /** qBittorrent infohash (v1 hex) for magnet/url items handed to qBittorrent. */
+  torrentHash?: string | null;
+  /** Last qBittorrent progress snapshot (null until the first one lands). */
+  progressPct?: number | null;
+  dlSpeedBps?: number | null;
+  downloadedBytes?: number | null;
+  totalBytes?: number | null;
+  progressAt?: string | null;
+}
+
+/** Progress snapshot reported to the relay so the SENDER can read it on demand. */
+export interface DirectDownloadProgress {
+  progressPct: number | null;
+  dlSpeedBps: number | null;
+  downloadedBytes: number | null;
+  totalBytes: number | null;
 }
 
 interface QueueFile {
@@ -90,6 +107,8 @@ export class DirectDownloadsService {
   async accept(id: string): Promise<DirectDownloadItem[]> {
     await this.#downloadPending(id);
     await this.#remoteAction(id, 'accept').catch(() => {});
+    // Fresh progress snapshot right away so the sender's first Check has data.
+    await this.#refreshProgress().catch(() => {});
     return this.listLocal();
   }
 
@@ -134,6 +153,11 @@ export class DirectDownloadsService {
           });
         }
       }
+
+      // Receiver-side progress: refresh local qBittorrent snapshots and push
+      // them to the relay. The SENDER only ever reads the stored snapshot on
+      // demand — this push is the receiver's own cycle, not sender polling.
+      await this.#refreshProgress();
     } catch (error) {
       this.log.debug?.({ err: String(error) }, 'direct-jobs poll skipped');
     } finally {
@@ -173,6 +197,9 @@ export class DirectDownloadsService {
           savePath: s.clientDownloadDir,
           autoTMM: false,
         });
+        // Remember the infohash so later polls can report % + speed.
+        // Magnet-only: .torrent URLs resolve server-side inside qBittorrent.
+        item.torrentHash = torrentHashFor(item.source);
       }
       item.state = 'done';
       this.log.info({ id, kind: item.sourceKind }, 'direct download accepted and started');
@@ -189,6 +216,69 @@ export class DirectDownloadsService {
     const client = this.relay.httpClient();
     if (!token || !client) return;
     await client.request('POST', ApiRoutes.directJobAction(id, action), undefined, { token });
+  }
+
+  async #remoteReport(id: string, report: DirectDownloadProgress): Promise<void> {
+    const token = this.relay.tokenForPolling();
+    const client = this.relay.httpClient();
+    if (!token || !client) return;
+    await client.request('POST', ApiRoutes.directJobReport(id), report, { token });
+  }
+
+  /**
+   * Refreshes qBittorrent progress for accepted items that carry a torrent
+   * hash and aren't complete yet, persists the snapshot locally, and pushes
+   * it to the relay for the sender's on-demand reads. Best-effort: qBittorrent
+   * failures are swallowed — they must never break the receive poll.
+   */
+  async #refreshProgress(): Promise<void> {
+    const items = await this.#loadQueue();
+    const active = items.filter(
+      (i) => i.torrentHash && i.state === 'done' && i.progressPct !== 100,
+    );
+    if (active.length === 0) return;
+    const s = this.settings.get();
+    if (!s.clientQbitUrl) return;
+    let infos: Array<{
+      hash: string;
+      progress: number;
+      dlspeed: number;
+      downloaded: number;
+      total_size: number;
+    }> = [];
+    try {
+      const apiKey = this.secrets.get(SECRET_CLIENT_QBIT_KEY) ?? undefined;
+      const qbit = new QbitTorrentService({ baseUrl: s.clientQbitUrl, apiKey });
+      infos = await qbit.client.getTorrents(active.map((i) => i.torrentHash as string));
+    } catch {
+      return;
+    }
+    const byHash = new Map(infos.map((info) => [info.hash.toLowerCase(), info]));
+    let changed = false;
+    const reports: Array<{ id: string; report: DirectDownloadProgress }> = [];
+    for (const item of active) {
+      const info = byHash.get((item.torrentHash as string).toLowerCase());
+      if (!info) continue;
+      item.progressPct = Math.round(info.progress * 1000) / 10;
+      item.dlSpeedBps = info.dlspeed;
+      item.downloadedBytes = info.downloaded;
+      item.totalBytes = info.total_size;
+      item.progressAt = new Date().toISOString();
+      changed = true;
+      reports.push({
+        id: item.id,
+        report: {
+          progressPct: item.progressPct,
+          dlSpeedBps: item.dlSpeedBps,
+          downloadedBytes: item.downloadedBytes,
+          totalBytes: item.totalBytes,
+        },
+      });
+    }
+    if (changed) await this.#saveQueue(items);
+    for (const r of reports) {
+      await this.#remoteReport(r.id, r.report).catch(() => {});
+    }
   }
 
   async #markLocal(id: string, patch: Partial<DirectDownloadItem>): Promise<void> {
@@ -223,5 +313,15 @@ export class DirectDownloadsService {
     const file = this.#queuePath();
     await mkdir(dirname(file), { recursive: true });
     await writeFile(file, JSON.stringify({ version: 1, items } satisfies QueueFile, null, 2), 'utf8');
+  }
+}
+
+/** v1 infohash (lowercase hex) for magnet sources; null when unresolvable. */
+function torrentHashFor(source: string): string | null {
+  try {
+    const parsed = parseTorrentSource(source);
+    return parsed.kind === 'magnet' ? (parsed.infoHashV1 ?? null) : null;
+  } catch {
+    return null;
   }
 }

@@ -84,7 +84,19 @@ const clientBridge = {
   friendsGet: () => ipcRenderer.invoke(ClientIpc.friendsGet),
   friendsAdd: (friend: { clientId: string; name: string }) =>
     ipcRenderer.invoke(ClientIpc.friendsAdd, friend),
+  friendsRename: (clientId: string, alias: string) =>
+    ipcRenderer.invoke(ClientIpc.friendsRename, clientId, alias),
   friendsRemove: (clientId: string) => ipcRenderer.invoke(ClientIpc.friendsRemove, clientId),
+  directJobsSent: () => ipcRenderer.invoke(ClientIpc.directJobsSent),
+  directJobStatus: (id: string) => ipcRenderer.invoke(ClientIpc.directJobStatus, id),
+
+  readText: async (): Promise<string> => {
+    try {
+      return String(await ipcRenderer.invoke(ClientIpc.readText))
+    } catch {
+      return ''
+    }
+  },
 
   copyText: async (text: string): Promise<boolean> => {
     try {

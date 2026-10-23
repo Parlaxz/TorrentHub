@@ -137,6 +137,9 @@ export function registerClientBridgeIpc(client: ClientRelayService): void {
     clipboard.writeText(String(text ?? ''))
     return true
   })
+  // Clipboard reads MUST also go through main: the sandboxed renderer has no
+  // clipboard-read permission; main-process clipboard.readText is reliable.
+  handle(ClientIpc.readText, () => clipboard.readText())
   handle(ClientIpc.pair, (host: unknown, port: unknown, code: unknown) =>
     client.pair(String(host ?? ''), Number(port) || 47821, String(code ?? '')),
   )
@@ -171,8 +174,15 @@ export function registerClientBridgeIpc(client: ClientRelayService): void {
     const f = (friend ?? {}) as { clientId?: unknown; name?: unknown }
     return client.addFriend({ clientId: String(f.clientId ?? ''), name: String(f.name ?? '') })
   })
+  handle(ClientIpc.friendsRename, (clientId: unknown, alias: unknown) =>
+    client.renameFriend(String(clientId ?? ''), String(alias ?? '')),
+  )
   handle(ClientIpc.friendsRemove, (clientId: unknown) =>
     client.removeFriend(String(clientId ?? '')),
+  )
+  handle(ClientIpc.directJobsSent, () => client.listSentDirectJobs())
+  handle(ClientIpc.directJobStatus, (id: unknown) =>
+    client.getDirectJobStatus(String(id ?? '')),
   )
 }
 
