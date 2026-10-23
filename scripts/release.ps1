@@ -78,7 +78,7 @@ if ($currentVersion -ne $newVersion) {
 }
 
 # 2. Build + package.
-$publishFlag = '--publish never'
+$publishFlag = '--publish=never'
 $willPublish = $false
 if ($Publish) {
   if ([string]::IsNullOrWhiteSpace($env:GH_TOKEN)) {
