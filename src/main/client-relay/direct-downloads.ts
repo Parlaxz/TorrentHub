@@ -23,6 +23,8 @@ export interface DirectDownloadItem {
   id: string;
   source: string;
   sourceKind: 'magnet' | 'url' | 'direct';
+  /** File indexes picked by the sender; null/empty = whole torrent. */
+  selection?: number[] | null;
   /** pending | downloading | done | failed | declined */
   state: 'pending' | 'downloading' | 'done' | 'failed' | 'declined';
   error?: string | null;
@@ -129,12 +131,14 @@ export class DirectDownloadsService {
       const client = this.relay.httpClient();
       if (!token || !client) return;
 
-      const response = await client.request<{ jobs: Array<{ id: string; source: string; sourceKind: 'magnet' | 'url' | 'direct' }> }>(
-        'GET',
-        ApiRoutes.directJobs,
-        undefined,
-        { token },
-      );
+      const response = await client.request<{
+        jobs: Array<{
+          id: string;
+          source: string;
+          sourceKind: 'magnet' | 'url' | 'direct';
+          selection?: number[] | null;
+        }>;
+      }>('GET', ApiRoutes.directJobs, undefined, { token });
 
       const known = new Set((await this.#loadQueue()).map((i) => i.id));
       for (const job of response.jobs) {
@@ -143,6 +147,7 @@ export class DirectDownloadsService {
           id: job.id,
           source: job.source,
           sourceKind: job.sourceKind,
+          selection: job.selection ?? null,
           state: 'pending',
           createdAt: new Date().toISOString(),
         });
@@ -192,14 +197,34 @@ export class DirectDownloadsService {
         const apiKey = this.secrets.get(SECRET_CLIENT_QBIT_KEY) ?? undefined;
         if (!s.clientQbitUrl) throw new Error('qBittorrent URL is not configured');
         const qbit = new QbitTorrentService({ baseUrl: s.clientQbitUrl, apiKey });
+        const wantsSelection = (item.selection?.length ?? 0) > 0;
+        const tag = `vr_direct_${item.id}`;
         await qbit.client.addTorrent({
           urls: [item.source],
           savePath: s.clientDownloadDir,
           autoTMM: false,
+          ...(wantsSelection ? { tags: [tag] } : {}),
         });
         // Remember the infohash so later polls can report % + speed.
-        // Magnet-only: .torrent URLs resolve server-side inside qBittorrent.
-        item.torrentHash = torrentHashFor(item.source);
+        // Magnet: known upfront. .torrent URL: find it by the tag we just added.
+        let hash = item.sourceKind === 'magnet' ? torrentHashFor(item.source) : null;
+        item.torrentHash = hash;
+        if (wantsSelection) {
+          // Do not block the accept IPC / receive poll on slow metadata.
+          void (async () => {
+            const resolved = hash ?? (await this.#hashForTag(qbit, tag));
+            if (!resolved) return;
+            item.torrentHash = resolved;
+            const queued = await this.#loadQueue();
+            const stored = queued.find((entry) => entry.id === item.id);
+            if (stored) {
+              stored.torrentHash = resolved;
+              await this.#saveQueue(queued);
+            }
+            await this.#applySelection(qbit, resolved, item.selection!);
+            await qbit.client.removeTags([resolved], [tag]).catch(() => {});
+          })().catch(() => {});
+        }
       }
       item.state = 'done';
       this.log.info({ id, kind: item.sourceKind }, 'direct download accepted and started');
@@ -225,6 +250,52 @@ export class DirectDownloadsService {
     await client.request('POST', ApiRoutes.directJobReport(id), report, { token });
   }
 
+  /** Find a just-added .torrent URL's hash by its temporary tag. */
+  async #hashForTag(qbit: QbitTorrentService, tag: string): Promise<string | null> {
+    const deadline = Date.now() + 60_000;
+    for (;;) {
+      try {
+        const infos = await qbit.client.getTorrents();
+        const match = infos.find((info) => tagList(info.tags).includes(tag));
+        if (match) return match.hash;
+      } catch {
+        /* keep polling */
+      }
+      if (Date.now() > deadline) return null;
+      await sleep(1000);
+    }
+  }
+
+  /**
+   * Apply the sender's file indexes once metadata is available.
+   * Unselected files get priority 0; selected files get normal priority.
+   */
+  async #applySelection(
+    qbit: QbitTorrentService,
+    hash: string,
+    selection: number[],
+  ): Promise<void> {
+    const wanted = new Set(selection);
+    const deadline = Date.now() + 60_000;
+    for (;;) {
+      try {
+        const files = await qbit.client.getTorrentFiles(hash);
+        if (files.length > 0) {
+          const all = files.map((f) => f.index);
+          const selected = all.filter((i) => wanted.has(i));
+          const unselected = all.filter((i) => !wanted.has(i));
+          await qbit.client.setFilePriority(hash, unselected, 0);
+          await qbit.client.setFilePriority(hash, selected, 1);
+          return;
+        }
+      } catch {
+        /* metadata not ready yet */
+      }
+      if (Date.now() > deadline) return;
+      await sleep(1000);
+    }
+  }
+
   /**
    * Refreshes qBittorrent progress for accepted items that carry a torrent
    * hash and aren't complete yet, persists the snapshot locally, and pushes
@@ -239,6 +310,8 @@ export class DirectDownloadsService {
     if (active.length === 0) return;
     const s = this.settings.get();
     if (!s.clientQbitUrl) return;
+    const apiKey = this.secrets.get(SECRET_CLIENT_QBIT_KEY) ?? undefined;
+    const qbit = new QbitTorrentService({ baseUrl: s.clientQbitUrl, apiKey });
     let infos: Array<{
       hash: string;
       progress: number;
@@ -247,8 +320,6 @@ export class DirectDownloadsService {
       total_size: number;
     }> = [];
     try {
-      const apiKey = this.secrets.get(SECRET_CLIENT_QBIT_KEY) ?? undefined;
-      const qbit = new QbitTorrentService({ baseUrl: s.clientQbitUrl, apiKey });
       infos = await qbit.client.getTorrents(active.map((i) => i.torrentHash as string));
     } catch {
       return;
@@ -259,10 +330,31 @@ export class DirectDownloadsService {
     for (const item of active) {
       const info = byHash.get((item.torrentHash as string).toLowerCase());
       if (!info) continue;
-      item.progressPct = Math.round(info.progress * 1000) / 10;
+      let progressPct = Math.round(info.progress * 1000) / 10;
+      let downloadedBytes = info.downloaded;
+      let totalBytes = info.total_size;
+      // A selected subset never reaches 100% on the whole-torrent counter.
+      if (item.selection?.length) {
+        try {
+          const wanted = new Set(item.selection);
+          const files = await qbit.client.getTorrentFiles(info.hash);
+          const chosen = files.filter((f) => wanted.has(f.index));
+          if (chosen.length > 0) {
+            totalBytes = chosen.reduce((sum, f) => sum + f.size, 0);
+            downloadedBytes = chosen.reduce((sum, f) => sum + f.size * f.progress, 0);
+            progressPct =
+              totalBytes > 0
+                ? Math.round((downloadedBytes / totalBytes) * 1000) / 10
+                : 0;
+          }
+        } catch {
+          /* fall back to whole-torrent progress */
+        }
+      }
+      item.progressPct = progressPct;
       item.dlSpeedBps = info.dlspeed;
-      item.downloadedBytes = info.downloaded;
-      item.totalBytes = info.total_size;
+      item.downloadedBytes = downloadedBytes;
+      item.totalBytes = totalBytes;
       item.progressAt = new Date().toISOString();
       changed = true;
       reports.push({
@@ -324,4 +416,19 @@ function torrentHashFor(source: string): string | null {
   } catch {
     return null;
   }
+}
+
+function tagList(tags: string[] | string | undefined): string[] {
+  if (Array.isArray(tags)) return tags;
+  if (typeof tags === 'string') {
+    return tags
+      .split(',')
+      .map((tag) => tag.trim())
+      .filter(Boolean);
+  }
+  return [];
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }

@@ -42,10 +42,19 @@ describe('relay: on-demand direct-job sender status', () => {
         method: 'POST',
         url: '/v1/direct-jobs',
         headers: { authorization: `Bearer ${senderToken}` },
-        payload: { source: MAGNET, targetClientId: receiverId },
+        payload: { source: MAGNET, targetClientId: receiverId, selection: [2, 0, 2] },
       });
       assert.equal(created.statusCode, 201);
       const jobId = (created.json() as { id: string }).id;
+
+      // The receiver gets the sender's file picks, deduped and sorted.
+      const queued = await app.inject({
+        method: 'GET',
+        url: '/v1/direct-jobs',
+        headers: { authorization: `Bearer ${receiverToken}` },
+      });
+      const queuedJob = (queued.json() as { jobs: Array<Record<string, unknown>> }).jobs[0];
+      assert.deepEqual(queuedJob['selection'], [0, 2]);
 
       // /sent: sender sees it WITHOUT the link echoed back.
       const sent = await app.inject({
@@ -59,6 +68,8 @@ describe('relay: on-demand direct-job sender status', () => {
       assert.equal(jobs[0]['id'], jobId);
       assert.equal(jobs[0]['state'], 'queued');
       assert.equal(jobs[0]['targetClientId'], receiverId);
+      assert.deepEqual(jobs[0]['selection'], [0, 2]);
+      assert.equal(typeof jobs[0]['sourcePreview'], 'string');
       assert.equal('source' in jobs[0], false);
 
       // Receiver sent nothing.

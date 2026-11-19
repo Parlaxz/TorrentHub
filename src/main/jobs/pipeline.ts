@@ -8,6 +8,7 @@
  * No crash/restart recovery: see JobEngine.startupSweep.
  */
 import type {
+  CleanupPolicy,
   DownloadTelemetry,
   FailureKind,
   JobRecord,
@@ -107,6 +108,11 @@ export class TransferPipeline {
     }
     await this.#runDownload();
     if (!this.#shouldContinue()) return;
+
+    if (record.goal === "download") {
+      await this.#finishDownloadOnly();
+      return;
+    }
 
     if (record.zipRequired) {
       await this.#gatePackagingOnStorage();
@@ -222,6 +228,11 @@ export class TransferPipeline {
 
   async #runDownload(): Promise<void> {
     const { record } = this;
+    if (record.source.kind === "bundle") {
+      record.stages.download = "skipped";
+      await this.#save();
+      return;
+    }
     const { torrent, storage } = this.#deps;
     record.state = "downloading";
     record.stages.download = "active";
@@ -336,6 +347,18 @@ export class TransferPipeline {
       record.stages.packaging = "skipped";
     }
     await this.#save();
+  }
+
+  /** Park a downloads-list job: files stay on disk until ordered or deleted. */
+  async #finishDownloadOnly(): Promise<void> {
+    const { record } = this;
+    record.state = "complete";
+    record.stages.packaging = "skipped";
+    record.stages.upload = "skipped";
+    record.stages.finalize = "skipped";
+    record.stages.cleanup = "skipped";
+    await this.#save();
+    this.settleHook?.();
   }
 
   /** Non-torrent URL: stream the file straight into the job's download dir. */
@@ -485,6 +508,14 @@ export class TransferPipeline {
   /** Explicit entries for the packaging adapter, in canonical selection order. */
   #packageEntries(): PackageEntry[] {
     const { record } = this;
+    if (record.bundleEntries?.length) {
+      return record.bundleEntries.map((entry) => ({
+        absoluteSourcePath: entry.absoluteSourcePath,
+        archiveRelativePath: entry.archiveRelativePath,
+        sizeBytes: entry.sizeBytes,
+        torrentFileIndex: entry.torrentFileIndex,
+      }));
+    }
     if (!record.metadata || !record.selection) {
       throw new InvalidTransitionError("job lacks metadata/selection prerequisites");
     }
@@ -599,6 +630,34 @@ export class TransferPipeline {
 
   #uploadResult: { url: string; sha256?: string | null; sizeBytes?: number | null } | null = null;
 
+  /** After a bundle upload, apply the order cleanup choice to each source job. */
+  async #cleanupBundleSources(policy: CleanupPolicy): Promise<void> {
+    for (const id of this.#record.bundleJobIds ?? []) {
+      const source = await this.#deps.repository.get(id).catch(() => null);
+      if (!source) continue;
+      if (policy.deleteTorrent && source.torrentId) {
+        try {
+          await this.#deps.torrent.deleteOwned(
+            {
+              torrentId: source.torrentId,
+              jobId: source.id,
+              infoHash: source.torrentId,
+              savePathPrefix: source.downloadDir ?? undefined,
+            },
+            policy.deleteFiles,
+          );
+        } catch {
+          /* best effort: guarded adapter may refuse unknown/unowned torrents */
+        }
+      } else if (policy.deleteFiles && source.downloadDir) {
+        await this.#deps.workspace.removePath(source.downloadDir).catch(() => {});
+      }
+      if (policy.deleteFiles && source.jobDir) {
+        await this.#deps.workspace.removePath(source.jobDir).catch(() => {});
+      }
+    }
+  }
+
   async #runFinalizeAndCleanup(): Promise<void> {
     const { record } = this;
     record.state = "finalizing";
@@ -656,6 +715,9 @@ export class TransferPipeline {
       const handle = this.#ownedHandle();
       if (handle && policy.deleteTorrent) {
         await this.#deps.torrent.deleteOwned(handle, policy.deleteFiles);
+      }
+      if (record.source.kind === "bundle" && record.bundleJobIds?.length) {
+        await this.#cleanupBundleSources(policy);
       }
       record.stages.cleanup = "complete";
     } catch (error) {

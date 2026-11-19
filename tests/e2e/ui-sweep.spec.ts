@@ -14,7 +14,7 @@ import { makeTempUserData } from './harness/paths'
 
 /**
  * UISWEEP lane - machine-readable interactive-control inventory per mounted
- * surface. Permanent IDs UISWEEP-001..012; never renumber.
+ * surface. Permanent IDs UISWEEP-001..013; never renumber.
  *
  * Gate: ZERO interactive controls (buttons/links/textboxes/searchboxes/
  * checkboxes/radios/comboboxes/switches) may have an EMPTY accessible name.
@@ -201,14 +201,6 @@ async function reachTree(app: AppHandle): Promise<void> {
   })
 }
 
-async function continueToPreflight(app: AppHandle): Promise<void> {
-  await app.page.getByRole('button', { name: 'Continue', exact: true }).click()
-  await app.waitFor('preflight verdict + Start button', async () => {
-    const start = app.page.getByRole('button', { name: 'Start', exact: true })
-    return (await start.count()) > 0 && start.first().isVisible()
-  })
-}
-
 /* ------------------------------------------------------------------ */
 /* UISWEEP-001..012                                                    */
 
@@ -250,7 +242,8 @@ test('UISWEEP-003: client Home screen control inventory', async () => {
 
   await expect(app.page.getByRole('textbox', { name: 'Torrent magnet link or URL' })).toHaveCount(1)
   await expect(app.page.getByRole('button', { name: 'Continue', exact: true })).toHaveCount(1)
-  await expect(app.page.getByTestId('add-friend')).toBeVisible()
+  await expect(app.page.getByRole('heading', { name: 'Downloads', exact: true })).toBeVisible()
+  await expect(app.page.getByRole('heading', { name: 'Orders', exact: true })).toBeVisible()
 })
 
 test('UISWEEP-004: client Selection screen (active draft) control inventory', async () => {
@@ -265,58 +258,99 @@ test('UISWEEP-004: client Selection screen (active draft) control inventory', as
   await expect(app.page.getByRole('searchbox', { name: 'Filter files' })).toHaveCount(1)
   await expect(app.page.getByRole('button', { name: 'Select All' })).toHaveCount(1)
   await expect(app.page.getByRole('button', { name: 'Select None' })).toHaveCount(1)
-  await expect(app.page.getByRole('button', { name: 'Continue', exact: true })).toHaveCount(1)
+  await expect(app.page.getByTestId('add-to-order')).toBeVisible()
+  await expect(app.page.getByTestId('add-to-downloads')).toBeVisible()
+  await expect(app.page.getByTestId('send-to-friend-open')).toBeVisible()
   await expect(app.page.getByRole('tree', { name: 'Torrent files' })).toHaveCount(1)
 })
 
-test('UISWEEP-005: client ActiveJob screen control inventory', async () => {
+test('UISWEEP-005: adding to an order shows the confirm popup and an order row', async () => {
   test.slow()
   await startCluster('UISWEEP-005', { downloadTicks: 40 })
   const app = client!.app
   await submitIntake(app, E2E_MAGNET)
   await reachTree(app)
-  await continueToPreflight(app)
-  await app.page.getByRole('button', { name: 'Start', exact: true }).click()
-  await app.waitFor(
-    'active job screen (stage pipeline visible)',
-    async () => (await app.page.getByText('UPLOAD TO VIKING').count()) > 0,
-    { timeoutMs: 30_000 }
-  )
-  await app.screenshot('client-active-job')
-
-  await sweepSurface(app, 'client-active-job')
-
-  await expect(app.page.getByRole('button', { name: 'Cancel job' })).toHaveCount(1)
-  await expect(app.page.getByRole('list', { name: 'Job stages' })).toHaveCount(1)
-
-  // Leave no live job behind.
-  await app.page.getByRole('button', { name: 'Cancel job' }).click()
-  await app.waitFor('back on Home after cancel', async () => {
-    return (await app.page.getByRole('textbox', { name: 'Torrent magnet link or URL' }).count()) > 0
+  await app.page.getByTestId('add-to-order').click()
+  await app.page.getByRole('dialog', { name: 'Add to order' }).waitFor({ state: 'visible', timeout: 10_000 })
+  await app.waitFor('order preflight verdict', async () => {
+    return (await app.page.getByText(/Enough storage/).count()) > 0
   })
+  await app.page.getByTestId('confirm-commit').click()
+
+  await app.waitFor('order row on Home', async () => {
+    return (await app.page.locator('[data-testid^="order-"]').count()) > 0
+  }, { timeoutMs: 30_000 })
+  await app.screenshot('client-order-created')
+
+  await sweepSurface(app, 'client-orders')
+
+  // Stop the order so no transfer is left behind.
+  app.page.once('dialog', (dialog) => void dialog.accept())
+  await app.page.locator('[data-testid^="dismiss-order-"]').first().click()
+  await app.waitFor('order dismissed', async () => {
+    return (await app.page.locator('[data-testid^="order-"]').count()) === 0
+  }, { timeoutMs: 20_000 })
 })
 
-test('UISWEEP-006: client Complete screen control inventory', async () => {
+test('UISWEEP-006: a finished order exposes its result links on Home', async () => {
   test.slow()
   await startCluster('UISWEEP-006')
   const app = client!.app
   await submitIntake(app, E2E_MAGNET)
   await reachTree(app)
-  await continueToPreflight(app)
-  await app.page.getByRole('button', { name: 'Start', exact: true }).click()
-  await app.waitFor(
-    'CompleteScreen',
-    async () => (await app.page.getByRole('heading', { name: 'Complete' }).count()) > 0,
-    { timeoutMs: 60_000 }
-  )
-  await app.screenshot('client-complete')
+  await app.page.getByTestId('add-to-order').click()
+  await app.page.getByRole('dialog', { name: 'Add to order' }).waitFor({ state: 'visible', timeout: 10_000 })
+  await app.waitFor('order preflight verdict', async () => {
+    return (await app.page.getByText(/Enough storage/).count()) > 0
+  })
+  await app.page.getByTestId('confirm-commit').click()
 
-  await sweepSurface(app, 'client-complete')
+  await app.waitFor('order complete with Copy Link', async () => {
+    return (await app.page.getByRole('button', { name: 'Copy Link', exact: true }).count()) > 0
+  }, { timeoutMs: 60_000 })
+  await app.screenshot('client-order-complete')
 
-  await expect(app.page.getByRole('textbox', { name: 'Viking URL' })).toHaveCount(1)
+  await sweepSurface(app, 'client-order-complete')
   await expect(app.page.getByRole('button', { name: 'Copy Link', exact: true })).toHaveCount(1)
-  await expect(app.page.getByTestId('open-page-link')).toHaveCount(1)
-  await expect(app.page.getByRole('button', { name: 'New Torrent' })).toHaveCount(1)
+})
+
+test('UISWEEP-013: a parked download can be ordered from the downloads list', async () => {
+  test.slow()
+  await startCluster('UISWEEP-013')
+  const app = client!.app
+
+  const input = app.page.getByRole('textbox', { name: 'Torrent magnet link or URL' })
+  await input.waitFor({ state: 'visible', timeout: 10_000 })
+  await input.fill(E2E_MAGNET)
+  await app.page.getByRole('button', { name: 'Continue', exact: true }).click()
+  await reachTree(app)
+  await app.page.getByTestId('add-to-downloads').click()
+  await app.page.getByRole('dialog', { name: 'Add to downloads' }).waitFor({ state: 'visible', timeout: 10_000 })
+  await app.waitFor('download preflight verdict', async () => {
+    return (await app.page.getByText(/Enough storage/).count()) > 0
+  })
+  await app.page.getByTestId('confirm-commit').click()
+
+  await app.waitFor('parked download finished', async () => {
+    return (await app.page.getByText('Downloaded — waiting for order').count()) === 1
+  }, { timeoutMs: 60_000 })
+  await app.screenshot('client-download-parked')
+
+  await app.page.locator('[data-testid^="download-"] input[type="checkbox"]').first().check()
+  await app.page.getByTestId('order-selected').click()
+  await app.page.getByRole('dialog', { name: 'Add to order' }).waitFor({ state: 'visible', timeout: 10_000 })
+  await app.waitFor('order preflight verdict', async () => {
+    return (await app.page.getByText(/Enough storage/).count()) > 0
+  })
+  await app.page.getByTestId('confirm-order').click()
+
+  await app.waitFor('order row from parked download', async () => {
+    return (await app.page.getByText(/1 download/).count()) > 0
+  }, { timeoutMs: 30_000 })
+  await app.screenshot('client-order-from-download')
+
+  app.page.once('dialog', (dialog) => void dialog.accept())
+  await app.page.locator('[data-testid^="dismiss-order-"]').first().click()
 })
 
 test('UISWEEP-007: client History screen control inventory', async () => {

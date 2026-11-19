@@ -50,11 +50,15 @@ export interface Friend {
   alias?: string
 }
 
-/** Sender-side view of a link previously sent to a friend (no link echo). */
+/** Sender-side view of a link previously sent to a friend. */
 export interface SentDirectJobStatus {
   id: string
   targetClientId: string
   targetName: string
+  /** Short source label for the downloads list after a restart. */
+  sourcePreview?: string | null
+  /** File indexes the sender picked; null = whole torrent. */
+  selection?: number[] | null
   state: string
   /** Last receiver-reported progress; null until the first report lands. */
   progress: {
@@ -156,7 +160,7 @@ export class ClientRelayService {
       // bearer token and is the truthful liveness+authorization check.
       await this.client()!.serverStatus(this.token())
       return { state: 'connected', host: conn.host, port: conn.port }
-    } catch (error) {
+    } catch {
       return {
         state: 'offline',
         host: conn.host,
@@ -192,70 +196,89 @@ export class ClientRelayService {
   // ----------------------------------------------------------------- jobs
 
   /**
-   * Confirms the selection and runs the authoritative storage preflight.
-   * When Start is blocked for insufficient disk the response still carries
-   * the full preflight figures (blocked=true) so the UI can show the exact
-   * deficit; the job stays awaiting_selection on the server.
+   * Server-authoritative storage check for a selection. Never starts the job.
+   * The goal decides whether a temp ZIP is part of the peak requirement.
    */
-  async confirmSelection(
+  async preflightSelection(
     jobId: string,
     fileIndexes: number[],
-    cleanup?: { deleteTorrent?: boolean; deleteFiles?: boolean; deleteZip?: boolean },
+    goal: 'order' | 'download' = 'order',
   ): Promise<BridgeResult<StoragePreflight>> {
     const indexes = [...new Set(fileIndexes)].sort((a, b) => a - b)
     if (indexes.length === 0) {
       return { ok: false, error: 'select at least one file' }
     }
     try {
-      const job = await this.authed<JobResponse>('POST', ApiRoutes.jobs, {
+      const preflight = await this.authed<StoragePreflight>('POST', ApiRoutes.jobPreflight, {
         intakeId: jobId,
         selection: indexes,
-        idempotencyKey: startKey(jobId),
-        ...(cleanup ? { cleanup } : {}),
+        goal,
       })
-      const preflight = job.storagePreflight ?? job.preflight ?? null
-      if (!preflight) {
-        this.log?.warn({ jobId }, 'start response carried no storage preflight')
-        return { ok: false, error: 'server did not return a storage preflight' }
-      }
       if (preflight.blocked) {
         this.log?.warn(
           { jobId, freeBytes: preflight.serverFreeBytes, requiredBytes: preflight.peakRequiredBytes },
-          'start blocked by server storage policy',
+          'storage preflight blocked',
         )
       }
       return { ok: true, value: preflight }
     } catch (error) {
       this.log?.warn(
         { jobId, err: error instanceof Error ? error.message : String(error) },
-        'confirm selection failed',
+        'selection preflight failed',
       )
       return { ok: false, error: describe(error) }
     }
   }
 
-  /**
-   * Start/Start-retry: replays POST /v1/jobs with the SAME idempotency key.
-   * If the original commit already started the transfer the engine returns
-   * the same job unchanged; if the first attempt was lost in flight — or the
-   * user is retrying Start after freeing disk space — this commits with the
-   * job's PERSISTED selection (set before preflight, even on the blocked
-   * path), never a re-derived one.
-   */
-  async startJob(jobId: string): Promise<void> {
-    const job = await this.getJob(jobId).catch(() => null);
-    const selection = job?.selection ?? [];
-    if (selection.length === 0) {
+  /** Commit the selection and start the transfer with the chosen goal. */
+  async startJob(
+    jobId: string,
+    options: {
+      selection: number[]
+      goal: 'order' | 'download'
+      cleanup?: { deleteTorrent?: boolean; deleteFiles?: boolean; deleteZip?: boolean }
+    },
+  ): Promise<void> {
+    if (options.selection.length === 0) {
       throw new RelayClientError({
         kind: 'validation',
         message: 'confirm the file selection first',
-      });
+      })
     }
     await this.authed<JobResponse>('POST', ApiRoutes.jobs, {
       intakeId: jobId,
-      selection,
+      selection: options.selection,
+      goal: options.goal,
       idempotencyKey: startKey(jobId),
-    });
+      ...(options.cleanup ? { cleanup: options.cleanup } : {}),
+    })
+  }
+
+  async listJobs(): Promise<JobSnapshot[]> {
+    const response = await this.authed<{ jobs: JobSnapshot[] }>('GET', ApiRoutes.jobs)
+    return response.jobs
+  }
+
+  async preflightOrder(jobIds: string[]): Promise<StoragePreflight> {
+    return this.authed<StoragePreflight>('POST', ApiRoutes.orderPreflight, { jobIds })
+  }
+
+  async createOrder(
+    jobIds: string[],
+    cleanup?: { deleteTorrent?: boolean; deleteFiles?: boolean; deleteZip?: boolean },
+  ): Promise<JobSnapshot> {
+    return this.authed<JobSnapshot>('POST', ApiRoutes.orders, {
+      jobIds,
+      ...(cleanup ? { cleanup } : {}),
+    })
+  }
+
+  async dismissJob(jobId: string): Promise<void> {
+    await this.authed('POST', ApiRoutes.dismissJob(encodeURIComponent(jobId)))
+  }
+
+  async discardJob(jobId: string): Promise<void> {
+    await this.authed('POST', ApiRoutes.discardJob(encodeURIComponent(jobId)))
   }
 
   async getJob(jobId: string): Promise<JobSnapshot> {
@@ -322,11 +345,13 @@ export class ClientRelayService {
   async sendToFriend(
     source: string,
     targetClientId: string,
+    selection: number[] = [],
   ): Promise<BridgeResult<{ id: string }>> {
     try {
       const result = await this.authed<{ id: string }>('POST', ApiRoutes.directJobs, {
         source: source.trim(),
         targetClientId,
+        ...(selection.length > 0 ? { selection } : {}),
       })
       return { ok: true, value: result }
     } catch (error) {

@@ -7,6 +7,10 @@ import { z } from 'zod'
 export const AppModeSchema = z.enum(['client', 'server'])
 export type AppMode = z.infer<typeof AppModeSchema>
 
+/** What happens after the download stage: upload an order, or park it. */
+export const JobGoalSchema = z.enum(['order', 'download'])
+export type JobGoal = z.infer<typeof JobGoalSchema>
+
 export const JobStateSchema = z.enum([
   'reading_metadata',
   'awaiting_selection',
@@ -59,7 +63,9 @@ export type TorrentMetadata = z.infer<typeof TorrentMetadataSchema>
 
 export const IntakeSourceSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('magnet'), value: z.string().min(1) }),
-  z.object({ kind: z.literal('url'), value: z.string().min(1) })
+  z.object({ kind: z.literal('url'), value: z.string().min(1) }),
+  z.object({ kind: z.literal('direct'), value: z.string().min(1) }),
+  z.object({ kind: z.literal('bundle'), value: z.string().min(1) })
 ])
 export type IntakeSource = z.infer<typeof IntakeSourceSchema>
 
@@ -67,6 +73,7 @@ export type IntakeSource = z.infer<typeof IntakeSourceSchema>
 export const IntakeDraftViewSchema = z.object({
   id: z.string().min(1),
   state: z.enum(['reading_metadata', 'awaiting_selection', 'failed']),
+  source: IntakeSourceSchema.optional(),
   metadata: TorrentMetadataSchema.nullable(),
   error: z.unknown().nullable()
 })
@@ -198,6 +205,7 @@ export const JobSnapshotSchema = z.object({
   state: JobStateSchema,
 
   source: IntakeSourceSchema,
+  goal: JobGoalSchema.optional(),
   selection: z.array(z.number().int().min(0)).nullable().optional(),
   selectedBytes: z.number().int().min(0).nullable().optional(),
   zipRequired: z.boolean().nullable().optional(),
@@ -214,6 +222,12 @@ export const JobSnapshotSchema = z.object({
 
   result: JobResultSchema.nullable().optional(),
   error: JobErrorSchema.nullable().optional(),
-  lastKnownStage: z.string().min(1).nullable().optional()
+  lastKnownStage: z.string().min(1).nullable().optional(),
+
+  /** Set on bundle orders: the download jobs folded into this order. */
+  bundleJobIds: z.array(z.string().min(1)).nullable().optional(),
+  /** Set on download jobs already folded into an order. */
+  orderedByJobId: z.string().min(1).nullable().optional(),
+  archived: z.boolean().optional()
 })
 export type JobSnapshot = z.infer<typeof JobSnapshotSchema>

@@ -58,11 +58,15 @@ export function initialStageMap(): StageMap {
   };
 }
 
+/** What happens after the download stage: upload an order, or park it. */
+export type JobGoal = "order" | "download";
+
 /** Where the torrent source came from. */
 export type IntakeSource =
   | { kind: "magnet"; value: string }
   | { kind: "url"; value: string }
-  | { kind: "direct"; value: string };
+  | { kind: "direct"; value: string }
+  | { kind: "bundle"; value: string };
 
 export interface TorrentFileEntry {
   /** qBittorrent file index inside the torrent. */
@@ -163,6 +167,14 @@ export interface CleanupPolicy {
   deleteZip: boolean;
 }
 
+/** One file folded into a bundle order (across source jobs). */
+export interface BundleEntry {
+  absoluteSourcePath: string;
+  archiveRelativePath: string;
+  sizeBytes: number;
+  torrentFileIndex?: number;
+}
+
 /** Full persisted/exposed job record. Kept intentionally small (JSON-backed). */
 export interface JobRecord {
   id: string;
@@ -171,6 +183,14 @@ export interface JobRecord {
   state: JobState;
 
   source: IntakeSource;
+  /** Defaults to "order" on legacy records. */
+  goal?: JobGoal;
+  /** Bundle orders only: the parked download jobs folded into this order. */
+  bundleJobIds?: string[] | null;
+  /** Bundle orders only: explicit packaging entries across source jobs. */
+  bundleEntries?: BundleEntry[] | null;
+  /** Download jobs only: the order that consumed this download. */
+  orderedByJobId?: string | null;
   /**
    * Paired client that created this job's intake (tenant attribution).
    * null/undefined = server-local or pre-upgrade record: visible ONLY to the
@@ -234,6 +254,7 @@ export interface JobRecord {
 export interface IntakeDraftView {
   id: string;
   state: Extract<JobState, "reading_metadata" | "awaiting_selection" | "failed">;
+  source: IntakeSource;
   metadata: TorrentMetadataInfo | null;
   error: JobError | null;
 }

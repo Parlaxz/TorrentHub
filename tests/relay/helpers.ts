@@ -48,7 +48,13 @@ export class FakeJobService implements JobService {
   async createIntake(input: Parameters<JobService["createIntake"]>[0]) {
     this.calls.push({ method: "createIntake", args: input });
     const id = `intake_${++this.seq}`;
-    const view: IntakeDraftView = { id, state: "reading_metadata", metadata: null, error: null };
+    const view: IntakeDraftView = {
+      id,
+      state: "reading_metadata",
+      source: input.source,
+      metadata: null,
+      error: null,
+    };
     this.intakes.set(id, view);
     return view;
   }
@@ -65,6 +71,53 @@ export class FakeJobService implements JobService {
     });
     this.jobs.set(rec.id, rec);
     return rec;
+  }
+
+  #preflight() {
+    return {
+      selectedFiles: 1,
+      selectedBytes: 100,
+      tempZipBytes: null,
+      safetyReserveBytes: 50,
+      peakRequiredBytes: 150,
+      serverFreeBytes: 10_000,
+      enough: true,
+      missingBytes: 0,
+      blocked: false,
+    };
+  }
+
+  async preflightSelection(input: Parameters<JobService["preflightSelection"]>[0]) {
+    this.calls.push({ method: "preflightSelection", args: input });
+    return this.#preflight();
+  }
+
+  async createOrder(input: Parameters<JobService["createOrder"]>[0]) {
+    this.calls.push({ method: "createOrder", args: input });
+    const rec = makeJobRecord(`job_${++this.seq}`, {
+      goal: "order",
+      source: { kind: "bundle", value: "Order" },
+      bundleJobIds: input.jobIds,
+    });
+    this.jobs.set(rec.id, rec);
+    return rec;
+  }
+
+  async preflightOrder(input: Parameters<JobService["preflightOrder"]>[0]) {
+    this.calls.push({ method: "preflightOrder", args: input });
+    return this.#preflight();
+  }
+
+  dismissJob(id: string) {
+    return this.action("dismissJob", id, (rec) => {
+      rec.archived = true;
+    });
+  }
+
+  discardDownload(id: string) {
+    return this.action("discardDownload", id, (rec) => {
+      rec.archived = true;
+    });
   }
 
   async listJobs() {

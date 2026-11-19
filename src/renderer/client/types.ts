@@ -48,7 +48,11 @@ export type StageMap = Record<StageName, StageState>;
 
 export type IntakeSource =
   | { kind: "magnet"; value: string }
-  | { kind: "url"; value: string };
+  | { kind: "url"; value: string }
+  | { kind: "direct"; value: string }
+  | { kind: "bundle"; value: string };
+
+export type JobGoal = "order" | "download";
 
 export interface TorrentFileEntry {
   index: number;
@@ -119,6 +123,12 @@ export interface JobRecord {
   state: JobState;
 
   source: IntakeSource;
+  goal?: JobGoal;
+  /** Set on bundle orders: the download jobs folded into this order. */
+  bundleJobIds?: string[] | null;
+  /** Set on download jobs already folded into an order. */
+  orderedByJobId?: string | null;
+  archived?: boolean;
   idempotencyKey?: string | null;
 
   metadata?: TorrentMetadataInfo | null;
@@ -148,6 +158,7 @@ export interface JobRecord {
 export interface IntakeDraftView {
   id: string;
   state: Extract<JobState, "reading_metadata" | "awaiting_selection" | "failed">;
+  source?: IntakeSource;
   metadata: TorrentMetadataInfo | null;
   error: JobError | null;
 }

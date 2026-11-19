@@ -23,6 +23,8 @@ export interface DirectJob {
   id: string;
   source: string;
   sourceKind: 'magnet' | 'url' | 'direct';
+  /** File indexes the sender picked; null = the whole torrent. */
+  selection?: number[] | null;
   targetClientId: string;
   targetName: string;
   /** Who sent it: the server user or another paired client. */
@@ -69,6 +71,7 @@ export class DirectJobStore {
     targetClientId: string,
     targetName: string,
     from: { clientId: string; name: string } = { clientId: 'server', name: 'Server' },
+    selection: number[] | null = null,
   ): Promise<DirectJob> {
     const jobs = await this.load();
     const now = new Date().toISOString();
@@ -76,6 +79,7 @@ export class DirectJobStore {
       id: `dj_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`,
       source,
       sourceKind,
+      selection: selection && selection.length > 0 ? [...new Set(selection)].sort((a, b) => a - b) : null,
       targetClientId,
       targetName,
       fromClientId: from.clientId,

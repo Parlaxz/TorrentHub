@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { ActiveJobScreen } from "../../../src/renderer/client/screens/ActiveJobScreen";
+import { JobDetail } from "../../../src/renderer/client/components/JobDetail";
 import type { DownloadTelemetry, JobSnapshot, StageMap, StorageView } from "../../../src/renderer/client/types";
 
 function stages(o: Partial<StageMap> = {}): StageMap {
@@ -65,12 +65,11 @@ function job(o: Partial<Omit<JobSnapshot, "stages">> & { stageOverrides?: Partia
 
 afterEach(cleanup);
 
-describe("ActiveJobScreen — stage rendering", () => {
+describe("JobDetail — stage rendering", () => {
   it("renders an active download with bar, seeds and peers — no fake overall percent", () => {
     render(
-      <ActiveJobScreen
+      <JobDetail
         job={job({ stageOverrides: { download: "active" }, telemetry: tel(), storage: store() })}
-        pollStatus="live"
       />,
     );
     expect(screen.getByText("DOWNLOAD")).toBeTruthy();
@@ -86,13 +85,13 @@ describe("ActiveJobScreen — stage rendering", () => {
 
   it("marks a completed stage with a checkmark", () => {
     const { container } = render(
-      <ActiveJobScreen job={job({ stageOverrides: { download: "complete" } })} pollStatus="live" />,
+      <JobDetail job={job({ stageOverrides: { download: "complete" } })} />,
     );
     expect(container.textContent).toContain("✓");
   });
 
   it("shows skipped packaging for single-file direct upload", () => {
-    render(<ActiveJobScreen job={job({ stageOverrides: { packaging: "skipped" }, zipRequired: false })} pollStatus="live" />);
+    render(<JobDetail job={job({ stageOverrides: { packaging: "skipped" }, zipRequired: false })} />);
     expect(screen.getByText("Skipped")).toBeTruthy();
     expect(screen.getByText(/uploaded directly/i)).toBeTruthy();
   });
@@ -100,13 +99,12 @@ describe("ActiveJobScreen — stage rendering", () => {
   it("shows a failed upload with a Retry Upload affordance", () => {
     const onRetryUpload = vi.fn();
     render(
-      <ActiveJobScreen
+      <JobDetail
         job={job({
           state: "failed",
           stageOverrides: { download: "complete", packaging: "complete", upload: "failed" },
           error: { kind: "upload", message: "Viking rejected part 3" },
         })}
-        pollStatus="live"
         onRetryUpload={onRetryUpload}
       />,
     );
@@ -116,16 +114,15 @@ describe("ActiveJobScreen — stage rendering", () => {
   });
 });
 
-describe("ActiveJobScreen — low seeds are warnings, not failures", () => {
+describe("JobDetail — low seeds are warnings, not failures", () => {
   it("zero seeds shows a waiting advisory and never FAILED", () => {
     render(
-      <ActiveJobScreen
+      <JobDetail
         job={job({
           stageOverrides: { download: "active" },
           telemetry: tel({ seeds: 0, peers: 4, speedBps: 0 }),
           hint: "waiting_for_peers",
         })}
-        pollStatus="live"
       />,
     );
     expect(screen.getByText(/Waiting for peers/)).toBeTruthy();
@@ -135,13 +132,12 @@ describe("ActiveJobScreen — low seeds are warnings, not failures", () => {
 
   it("few seeds shows the slow-download warning", () => {
     render(
-      <ActiveJobScreen
+      <JobDetail
         job={job({
           stageOverrides: { download: "active" },
           telemetry: tel({ seeds: 1, speedBps: 823 * 1024 }),
           hint: "slow",
         })}
-        pollStatus="live"
       />,
     );
     expect(screen.getByText(/Few available seeds/)).toBeTruthy();
@@ -150,23 +146,12 @@ describe("ActiveJobScreen — low seeds are warnings, not failures", () => {
 
   it("surfaces server storage warnings at both levels", () => {
     const { unmount } = render(
-      <ActiveJobScreen job={job({ storage: store({ warning: "low" }) })} pollStatus="live" />,
+      <JobDetail job={job({ storage: store({ warning: "low" }) })} />,
     );
     expect(screen.getByText(/Server storage running low/)).toBeTruthy();
     unmount();
 
-    render(<ActiveJobScreen job={job({ storage: store({ warning: "critical" }) })} pollStatus="live" />);
+    render(<JobDetail job={job({ storage: store({ warning: "critical" }) })} />);
     expect(screen.getByText(/critically low/)).toBeTruthy();
-  });
-
-  it("announces reconnecting without implying the job died", () => {
-    render(
-      <ActiveJobScreen
-        job={job({ stageOverrides: { download: "active" }, telemetry: tel() })}
-        pollStatus="reconnecting"
-      />,
-    );
-    expect(screen.getAllByText(/Reconnecting/i).length).toBeGreaterThan(0);
-    expect(screen.getByText(/continues on the server/)).toBeTruthy();
   });
 });

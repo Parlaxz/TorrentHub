@@ -32,6 +32,7 @@ export const jobCreateSchema = z.strictObject({
   intakeId: z.string().regex(SAFE_ID_RE),
   selection: z.array(z.number().int().min(0).max(1_000_000)).min(1).max(10_000).nullish(),
   zipRequired: z.boolean().nullish(),
+  goal: z.enum(['order', 'download']).optional(),
   idempotencyKey: idempotencyKeySchema,
   cleanup: z
     .strictObject({
@@ -41,6 +42,30 @@ export const jobCreateSchema = z.strictObject({
     })
     .partial()
     .nullish(),
+});
+
+export const jobPreflightSchema = z.strictObject({
+  intakeId: z.string().regex(SAFE_ID_RE),
+  selection: z.array(z.number().int().min(0).max(1_000_000)).min(1).max(10_000),
+  goal: z.enum(['order', 'download']).optional(),
+});
+
+const cleanupSchema = z
+  .strictObject({
+    deleteTorrent: z.boolean(),
+    deleteFiles: z.boolean(),
+    deleteZip: z.boolean(),
+  })
+  .partial()
+  .nullish();
+
+export const orderPreflightSchema = z.strictObject({
+  jobIds: z.array(z.string().regex(SAFE_ID_RE)).min(1).max(50),
+});
+
+export const orderCreateSchema = z.strictObject({
+  jobIds: z.array(z.string().regex(SAFE_ID_RE)).min(1).max(50),
+  cleanup: cleanupSchema,
 });
 
 export const pairRequestSchema = z.strictObject({

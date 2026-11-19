@@ -81,10 +81,26 @@ async function rosterOf(cli: PairedClient): Promise<RosterEntry[]> {
   return cli.app.clientBridge<RosterEntry[]>('clientsList()')
 }
 
+/** Opens a draft and the Send to Friend modal on the selection page. */
+async function openSendModal(cli: PairedClient): Promise<import('playwright').Locator> {
+  const input = cli.app.page.getByRole('textbox', { name: 'Torrent magnet link or URL' })
+  await input.waitFor({ state: 'visible', timeout: 10_000 })
+  await input.fill(E2E_MAGNET)
+  await cli.app.page.getByRole('button', { name: 'Continue', exact: true }).click()
+  await cli.app.waitFor('selection tree visible', async () => {
+    return (await cli.app.page.getByRole('tree', { name: 'Torrent files' }).count()) > 0
+  })
+  await cli.app.page.getByTestId('send-to-friend-open').click()
+  const dialog = cli.app.page.getByRole('dialog', { name: 'Send to friend' })
+  await dialog.waitFor({ state: 'visible', timeout: 10_000 })
+  return dialog
+}
+
 /** Adds the first available roster entry as a friend through the REAL modal. */
 async function addFirstFriendViaUi(cli: PairedClient): Promise<RosterEntry> {
   const roster = await rosterOf(cli)
   expect(roster.length).toBeGreaterThanOrEqual(1)
+  await openSendModal(cli)
   await cli.app.page.getByTestId('add-friend').click()
   const panel = cli.app.page.getByTestId('add-friend-panel')
   await panel.waitFor({ state: 'visible', timeout: 10_000 })
@@ -100,13 +116,14 @@ async function addFirstFriendViaUi(cli: PairedClient): Promise<RosterEntry> {
 test('MULTI-010: add-friend modal lists paired clients and a friend chip appears', async () => {
   const srv = await startCluster('MULTI-010')
   const a = await startClient('MULTI-010', srv, 'client-a')
-  const b = await startClient('MULTI-010', srv, 'client-b')
+  await startClient('MULTI-010', srv, 'client-b')
 
   // A's roster contains exactly B (self excluded).
   const roster = await rosterOf(a)
   expect(roster.length).toBe(1)
   const bEntry = roster[0]
 
+  await openSendModal(a)
   await a.app.page.getByTestId('add-friend').click()
   const panel = a.app.page.getByTestId('add-friend-panel')
   await panel.waitFor({ state: 'visible', timeout: 10_000 })
@@ -145,6 +162,8 @@ test('MULTI-012: empty states - no-friends text before adding; empty roster mess
   const srv = await startCluster('MULTI-012')
   const only = await startClient('MULTI-012', srv, 'client-only')
 
+  await openSendModal(only)
+
   // Before any friend: truthful empty-state copy.
   const noFriends = only.app.page.getByTestId('no-friends')
   await noFriends.waitFor({ state: 'visible', timeout: 10_000 })
@@ -163,22 +182,19 @@ test('MULTI-012: empty states - no-friends text before adding; empty roster mess
 /* ------------------------------------------------------------------ */
 /* MULTI-013..015 — send-to-friend panel                               */
 
-test('MULTI-013: valid source sent to a friend shows Sent feedback and lands on the server queue', async () => {
+test('MULTI-013: valid source sent to a friend shows a friend download row and lands on the server queue', async () => {
   const srv = await startCluster('MULTI-013')
   const a = await startClient('MULTI-013', srv, 'client-a')
   await startClient('MULTI-013', srv, 'client-b')
   const bEntry = await addFirstFriendViaUi(a)
 
-  const input = a.app.page.getByTestId('friend-link-input')
-  await input.waitFor({ state: 'visible', timeout: 10_000 })
-  await input.fill(E2E_MAGNET)
   await a.app.page.getByTestId('send-to-friend').click()
 
-  // "Sent ✓" feedback (escaped to keep this file pure ASCII).
-  await a.app.waitFor('Sent feedback visible', async () => {
-    return (await a.app.page.getByText('Sent \u2713').count()) > 0
+  // Home downloads list shows the friend's in-flight item.
+  await a.app.waitFor('friend download row visible', async () => {
+    return (await a.app.page.locator('[data-testid^="friend-download-"]').count()) > 0
   })
-  await a.app.screenshot('multi-013-sent-feedback')
+  await a.app.screenshot('multi-013-friend-download')
 
   // Cross-layer truth: the direct job really reached the server queue.
   await srv.app.waitFor('direct job recorded server-side', async () => {
@@ -193,12 +209,11 @@ test('MULTI-014: invalid source shows an inline error instead of sending', async
   const srv = await startCluster('MULTI-014')
   const a = await startClient('MULTI-014', srv, 'client-a')
   await startClient('MULTI-014', srv, 'client-b')
-  await addFirstFriendViaUi(a)
 
-  const input = a.app.page.getByTestId('friend-link-input')
+  const input = a.app.page.getByRole('textbox', { name: 'Torrent magnet link or URL' })
   await input.waitFor({ state: 'visible', timeout: 10_000 })
   await input.fill('not-a-magnet-or-url')
-  await a.app.page.getByTestId('send-to-friend').click()
+  await a.app.page.getByRole('button', { name: 'Continue', exact: true }).click()
 
   // Inline validation error (HomeScreen.validateIntakeInput copy).
   await a.app.waitFor('inline validation error visible', async () => {
@@ -226,9 +241,6 @@ test('MULTI-015: stale target (revoked friend) surfaces a truthful error', async
   )) as Record<string, unknown>
   expect(removed['removed']).toBe(true)
 
-  const input = a.app.page.getByTestId('friend-link-input')
-  await input.waitFor({ state: 'visible', timeout: 10_000 })
-  await input.fill(E2E_MAGNET)
   await a.app.page.getByTestId('send-to-friend').click()
 
   // The relay answers 404 "target client is not paired"; the humanized error

@@ -1,7 +1,24 @@
-import { useEffect, useState, type FormEvent } from "react";
-import { Button, ErrorText, Panel, SectionTitle, StatusDot } from "../components/ui";
-import type { ConnectionStatus, Friend, SentDirectJobStatus, VikingBridge } from "../lib/bridge";
-import { formatPercent, formatSpeed } from "../lib/format";
+import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
+import { JobDetail } from "../components/JobDetail";
+import { ProgressBar } from "../components/ProgressBar";
+import { StorageCheck } from "../components/StorageCheck";
+import {
+  Badge,
+  Button,
+  EmptyState,
+  ErrorText,
+  Modal,
+  Panel,
+  SectionTitle,
+  Spinner,
+} from "../components/ui";
+import type {
+  ConnectionStatus,
+  SentDirectJobStatus,
+  VikingBridge,
+} from "../lib/bridge";
+import { formatBytes, formatEta, formatPercent, formatSpeed } from "../lib/format";
+import { isTerminalJobState, type JobSnapshot } from "../types";
 
 const MAGNET_RE = /^magnet:\?xt=urn:btih:[a-z0-9]{32,}/i;
 const URL_RE = /^https?:\/\/\S+$/i;
@@ -15,7 +32,7 @@ export function validateIntakeInput(raw: string): string | null {
   return "Enter a magnet URI or an HTTP(S) URL pointing to a .torrent file.";
 }
 
-/** Screen 2 — Home / submit (+ friends: client-to-client sends). */
+/** Screen 2 — add a link, see downloads, see orders. */
 export function HomeScreen({
   bridge,
   connection,
@@ -31,40 +48,105 @@ export function HomeScreen({
 }) {
   const [value, setValue] = useState("");
   const [localError, setLocalError] = useState<string | null>(null);
-
-  const [friends, setFriends] = useState<Friend[]>([]);
-  const [showAdd, setShowAdd] = useState(false);
-  const [available, setAvailable] = useState<Array<{ clientId: string; name: string }>>([]);
-  const [pickId, setPickId] = useState("");
-  const [sendTarget, setSendTarget] = useState("");
-  const [friendLink, setFriendLink] = useState("");
-  const [friendMsg, setFriendMsg] = useState<string | null>(null);
-  const [friendError, setFriendError] = useState<string | null>(null);
-  const [friendBusy, setFriendBusy] = useState(false);
   const [pasteBusy, setPasteBusy] = useState(false);
 
-  // Inline nickname editing (local alias; the paired client name is kept).
-  const [renamingId, setRenamingId] = useState<string | null>(null);
-  const [renameDraft, setRenameDraft] = useState("");
-  const [renameBusy, setRenameBusy] = useState(false);
-
-  // Sender-side "ping": links sent this session + last on-demand status.
-  // Fetched ONLY when the user clicks Check — never polled.
-  interface SentEntry {
-    id: string;
-    targetName: string;
-    sourcePreview: string;
-    status: SentDirectJobStatus | null;
-    checking: boolean;
-  }
-  const [sentEntries, setSentEntries] = useState<SentEntry[]>([]);
-
-  useEffect(() => {
-    if (!bridge) return;
-    void bridge.friendsGet().then(setFriends).catch(() => {});
-  }, [bridge]);
+  const [jobs, setJobs] = useState<JobSnapshot[] | null>(null);
+  const [sent, setSent] = useState<SentDirectJobStatus[] | null>(null);
+  const [listError, setListError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [orderIds, setOrderIds] = useState<string[] | null>(null);
 
   const state = connection?.state ?? "offline";
+
+  const reload = useCallback(async (): Promise<void> => {
+    if (!bridge) return;
+    try {
+      const [nextJobs, nextSent] = await Promise.all([
+        bridge.listJobs(),
+        bridge.directJobsSent(),
+      ]);
+      setJobs(nextJobs);
+      setSent(nextSent);
+      setListError(null);
+    } catch (err) {
+      setListError(err instanceof Error ? err.message : "Could not load downloads.");
+    }
+  }, [bridge]);
+
+  useEffect(() => {
+    if (!bridge || state !== "connected") return;
+    let alive = true;
+    const tick = async (): Promise<void> => {
+      if (!alive) return;
+      await reload();
+    };
+    void tick();
+    const id = window.setInterval(tick, 2000);
+    return () => {
+      alive = false;
+      window.clearInterval(id);
+    };
+  }, [bridge, state, reload]);
+
+  const downloads = useMemo(
+    () =>
+      (jobs ?? []).filter(
+        (job) =>
+          job.goal === "download" &&
+          !job.archived &&
+          !job.orderedByJobId &&
+          job.state !== "reading_metadata" &&
+          job.state !== "awaiting_selection",
+      ),
+    [jobs],
+  );
+
+  const orders = useMemo(
+    () =>
+      (jobs ?? []).filter(
+        (job) =>
+          (job.goal ?? "order") === "order" &&
+          job.selection != null &&
+          !job.archived &&
+          job.state !== "reading_metadata" &&
+          job.state !== "awaiting_selection",
+      ),
+    [jobs],
+  );
+
+  const friendDownloads = useMemo(
+    () =>
+      (sent ?? []).filter(
+        (item) =>
+          item.state === "queued" ||
+          (item.state === "accepted" && (item.progress?.progressPct ?? 0) < 100),
+      ),
+    [sent],
+  );
+
+  const selectedJobs = downloads.filter((job) => selected.has(job.id));
+  const canOrder =
+    selectedJobs.length > 0 && selectedJobs.every((job) => job.state === "complete");
+
+  const toggleSelected = (id: string): void => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleExpanded = (id: string): void => {
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
 
   const submit = (e: FormEvent): void => {
     e.preventDefault();
@@ -77,200 +159,107 @@ export function HomeScreen({
     onSubmit(value.trim());
   };
 
-  const openAddFriend = async (): Promise<void> => {
-    if (!bridge) return;
-    setFriendMsg(null);
-    setFriendError(null);
-    setShowAdd(true);
-    try {
-      const list = await bridge.clientsList();
-      setAvailable(list);
-      setPickId(list[0]?.clientId ?? "");
-    } catch (err) {
-      setAvailable([]);
-      setFriendError(err instanceof Error ? err.message : "Could not reach the server.");
-    }
-  };
-
-  const addFriend = (): void => {
-    const pick = available.find((c) => c.clientId === pickId);
-    if (!bridge || !pick) return;
-    void bridge.friendsAdd(pick).then(setFriends);
-    setShowAdd(false);
-    setSendTarget((t) => t || pick.clientId);
-    setFriendMsg(`Added ${pick.name} as a friend.`);
-  };
-
-  const removeFriend = (clientId: string): void => {
-    if (!bridge) return;
-    void bridge.friendsRemove(clientId).then(setFriends);
-    if (sendTarget === clientId) setSendTarget("");
-  };
-
-  const displayName = (f: Friend): string => f.alias ?? f.name;
-
-  const startRename = (f: Friend): void => {
-    setRenamingId(f.clientId);
-    setRenameDraft(f.alias ?? "");
-    setFriendMsg(null);
-    setFriendError(null);
-  };
-
-  const saveRename = async (): Promise<void> => {
-    if (!bridge || !renamingId) return;
-    setRenameBusy(true);
-    try {
-      const res = await bridge.friendsRename(renamingId, renameDraft);
-      if (res.ok) {
-        setFriends(res.value);
-        setRenamingId(null);
-        setRenameDraft("");
-      } else {
-        setFriendError(res.error);
-      }
-    } finally {
-      setRenameBusy(false);
-    }
-  };
-
   const pasteClipboard = async (): Promise<void> => {
     if (!bridge) return;
     setPasteBusy(true);
-    setFriendError(null);
+    setLocalError(null);
     try {
       const text = (await bridge.readText()).trim();
       if (!text) {
-        setFriendError("Clipboard is empty — copy a magnet link or torrent URL first.");
+        setLocalError("Clipboard is empty — copy a magnet link or torrent URL first.");
         return;
       }
-      setFriendLink(text);
+      setValue(text);
     } finally {
       setPasteBusy(false);
     }
   };
 
-  const sendToFriend = async (): Promise<void> => {
-    if (!bridge || !sendTarget) return;
-    const invalid = validateIntakeInput(friendLink);
-    if (invalid) {
-      setFriendError(invalid);
+  const deleteSelected = async (): Promise<void> => {
+    if (!bridge || selectedJobs.length === 0) return;
+    if (
+      !window.confirm(
+        `Delete ${selectedJobs.length} download${selectedJobs.length === 1 ? "" : "s"} and their files from the server?`,
+      )
+    ) {
       return;
     }
-    setFriendError(null);
-    setFriendBusy(true);
-    try {
-      const target = friends.find((f) => f.clientId === sendTarget);
-      const source = friendLink.trim();
-      const res = await bridge.sendToFriend(source, sendTarget);
-      if (res.ok) {
-        setFriendLink("");
-        setFriendMsg("Sent ✓");
-        window.setTimeout(() => setFriendMsg(null), 2500);
-        const preview = source.length > 64 ? `${source.slice(0, 64)}…` : source;
-        setSentEntries((prev) =>
-          [
-            {
-              id: res.value.id,
-              targetName: target ? displayName(target) : sendTarget,
-              sourcePreview: preview,
-              status: null,
-              checking: false,
-            },
-            ...prev,
-          ].slice(0, 10),
-        );
-      } else {
-        setFriendError(res.error);
+    setActionError(null);
+    for (const job of selectedJobs) {
+      try {
+        await bridge.discardJob(job.id);
+      } catch (err) {
+        setActionError(err instanceof Error ? err.message : "Could not delete that download.");
+        break;
       }
-    } finally {
-      setFriendBusy(false);
     }
+    setSelected(new Set());
+    await reload();
   };
 
-  /** On-demand "ping": one status fetch per click, never polled. */
-  const checkSentStatus = async (id: string): Promise<void> => {
+  const dismissOrder = async (job: JobSnapshot): Promise<void> => {
     if (!bridge) return;
-    setSentEntries((prev) => prev.map((e) => (e.id === id ? { ...e, checking: true } : e)));
+    const active = !isTerminalJobState(job.state);
+    if (
+      !window.confirm(
+        active ? "Stop this order?" : "Remove this order from the list?",
+      )
+    ) {
+      return;
+    }
+    setActionError(null);
     try {
-      const status = await bridge.directJobStatus(id);
-      setSentEntries((prev) =>
-        prev.map((e) => (e.id === id ? { ...e, status, checking: false } : e)),
-      );
-    } catch {
-      setSentEntries((prev) => prev.map((e) => (e.id === id ? { ...e, checking: false } : e)));
-      setFriendError("Could not reach the server for that status check.");
+      await bridge.dismissJob(job.id);
+      await reload();
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : "Could not dismiss that order.");
     }
   };
 
-  const describeSentState = (status: SentDirectJobStatus): string => {
-    if (status.state === "queued") return "Waiting — your friend hasn't opened it yet";
-    if (status.state === "declined") return "Declined by your friend";
-    if (status.state !== "accepted") return status.state;
-    const p = status.progress;
-    if (p?.progressPct != null && p.progressPct >= 100) return "Complete ✓ — 100% on your friend's PC";
-    if (p?.progressPct != null) {
-      const age = ageAgo(p.updatedAt);
-      return `Downloading — ${formatPercent(p.progressPct)} • ${formatSpeed(p.dlSpeedBps)}${age ? ` • ${age}` : ""}`;
-    }
-    return "Received ✓ — download started on your friend's PC";
+  const copy = async (text: string): Promise<void> => {
+    if (bridge) await bridge.copyText(text).catch(() => false);
   };
 
-  const ageAgo = (iso: string): string => {
-    const ms = Date.now() - new Date(iso).getTime();
-    if (!Number.isFinite(ms) || ms < 0) return "";
-    const s = Math.floor(ms / 1000);
-    if (s < 5) return "just now";
-    if (s < 60) return `${s}s ago`;
-    const m = Math.floor(s / 60);
-    if (m < 60) return `${m}m ago`;
-    return `${Math.floor(m / 60)}h ago`;
+  const open = async (text: string): Promise<void> => {
+    await window.vikingRelay?.openExternal?.(text).catch(() => undefined);
   };
 
   return (
-    <div className="mx-auto w-full max-w-xl px-6 py-8">
+    <div className="mx-auto w-full max-w-2xl px-6 py-8">
       <Panel>
-        <SectionTitle>Server</SectionTitle>
-        <div className="mb-5 flex items-center gap-2 text-sm">
-          <StatusDot state={state} />
-          <span
-            className={`font-semibold capitalize ${
-              state === "connected"
-                ? "text-emerald-600 dark:text-emerald-400"
-                : state === "reconnecting"
-                  ? "text-amber-600 dark:text-amber-400"
-                  : "text-red-600 dark:text-red-400"
-            }`}
-          >
-            {state}
-          </span>
-          {connection?.host ? (
-            <span className="tabular-nums text-zinc-500 dark:text-zinc-400">
-              {connection.host}
-              {connection.port ? `:${connection.port}` : ""}
-            </span>
-          ) : null}
-        </div>
-
         <SectionTitle>Torrent / Magnet</SectionTitle>
         <form onSubmit={submit} noValidate>
-          <input
-            value={value}
-            onChange={(e) => setValue(e.target.value)}
-            placeholder="magnet:?xt=urn:btih:…"
-            aria-label="Torrent magnet link or URL"
-            aria-invalid={Boolean(localError) || undefined}
-            spellCheck={false}
-            autoComplete="off"
-            disabled={busy || state !== "connected"}
-            className={`w-full rounded-md border bg-white px-3 py-2 font-mono text-[13px] text-zinc-900 placeholder:text-zinc-400 shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500/60 disabled:opacity-60 dark:bg-zinc-900 dark:text-zinc-100 dark:placeholder:text-zinc-600 ${
-              localError || error
-                ? "border-red-500 focus:ring-red-500/60"
-                : "border-zinc-300 focus:border-blue-500 dark:border-zinc-700"
-            }`}
-          />
+          <div className="flex gap-2">
+            <input
+              value={value}
+              onChange={(e) => setValue(e.target.value)}
+              placeholder="magnet:?xt=urn:btih:…"
+              aria-label="Torrent magnet link or URL"
+              aria-invalid={Boolean(localError) || undefined}
+              spellCheck={false}
+              autoComplete="off"
+              disabled={busy || state !== "connected"}
+              className={`min-w-0 flex-1 rounded-md border bg-white px-3 py-2 font-mono text-[13px] text-zinc-900 placeholder:text-zinc-400 shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500/60 disabled:opacity-60 dark:bg-zinc-900 dark:text-zinc-100 dark:placeholder:text-zinc-600 ${
+                localError || error
+                  ? "border-red-500 focus:ring-red-500/60"
+                  : "border-zinc-300 focus:border-blue-500 dark:border-zinc-700"
+              }`}
+            />
+            <Button
+              variant="ghost"
+              onClick={() => void pasteClipboard()}
+              disabled={pasteBusy || state !== "connected"}
+              data-testid="torrent-paste"
+              title="Paste from clipboard"
+            >
+              Paste
+            </Button>
+          </div>
           <ErrorText>{localError ?? error}</ErrorText>
           <div className="mt-4 flex items-center justify-between">
-            <p className="text-[11px] text-zinc-400 dark:text-zinc-600">Magnet URI or HTTP(S) .torrent URL</p>
+            <p className="text-[11px] text-zinc-400 dark:text-zinc-600">
+              Magnet URI or HTTP(S) .torrent URL
+            </p>
             <Button type="submit" disabled={busy || state !== "connected"}>
               Continue
             </Button>
@@ -281,189 +270,488 @@ export function HomeScreen({
       <Panel className="mt-4">
         <SectionTitle
           right={
-            <Button variant="ghost" onClick={() => void openAddFriend()} data-testid="add-friend">
-              + Add friend
-            </Button>
+            selectedJobs.length > 0 ? (
+              <span className="text-[11px] tabular-nums text-zinc-500 dark:text-zinc-400">
+                {selectedJobs.length} selected
+              </span>
+            ) : undefined
           }
         >
-          Friends
+          Downloads
         </SectionTitle>
 
-        {friends.length === 0 ? (
-          <p className="text-xs text-zinc-500 dark:text-zinc-400" data-testid="no-friends">
-            No friends yet. Add other clients on this Radmin network to send them links directly.
-          </p>
+        {friendDownloads.length > 0 ? (
+          <div className="mb-4 space-y-2">
+            <h3 className="text-[11px] font-semibold uppercase tracking-widest text-zinc-400 dark:text-zinc-500">
+              From friends
+            </h3>
+            {friendDownloads.map((item) => (
+              <FriendDownloadRow key={item.id} item={item} />
+            ))}
+          </div>
+        ) : null}
+
+        {downloads.length === 0 ? (
+          friendDownloads.length === 0 ? (
+            <EmptyState
+              title="No downloads yet"
+              detail="Add a link above, or send one to a friend. Downloads parked here stay until you order or delete them."
+            />
+          ) : null
         ) : (
           <div className="space-y-2">
-            <div className="flex flex-wrap gap-1.5">
-              {friends.map((f) => (
-                <span
-                  key={f.clientId}
-                  className={`flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs ${
-                    sendTarget === f.clientId
-                      ? "border-blue-500 bg-blue-50 text-blue-700 dark:border-blue-700 dark:bg-blue-950/40 dark:text-blue-300"
-                      : "border-zinc-300 text-zinc-600 dark:border-zinc-700 dark:text-zinc-400"
-                  }`}
-                  title={f.alias ? `Paired as ${f.name}` : undefined}
-                >
-                  <button type="button" onClick={() => setSendTarget(f.clientId)} data-testid={`friend-${f.clientId}`}>
-                    {displayName(f)}
-                  </button>
-                  <button
-                    type="button"
-                    aria-label={`Rename ${displayName(f)}`}
-                    title="Give this friend a nickname"
-                    className="text-zinc-400 hover:text-blue-500"
-                    onClick={() => startRename(f)}
-                    data-testid={`friend-rename-${f.clientId}`}
-                  >
-                    ✎
-                  </button>
-                  <button
-                    type="button"
-                    aria-label={`Remove ${displayName(f)}`}
-                    className="text-zinc-400 hover:text-red-500"
-                    onClick={() => removeFriend(f.clientId)}
-                  >
-                    ✕
-                  </button>
-                </span>
-              ))}
-            </div>
-
-            {renamingId ? (
-              <div className="flex gap-2" data-testid="friend-rename-panel">
-                <input
-                  value={renameDraft}
-                  onChange={(e) => setRenameDraft(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") void saveRename();
-                    if (e.key === "Escape") setRenamingId(null);
-                  }}
-                  placeholder="Nickname (blank = paired name)"
-                  aria-label="Friend nickname"
-                  maxLength={32}
-                  autoComplete="off"
-                  spellCheck={false}
-                  disabled={renameBusy}
-                  className="min-w-0 flex-1 rounded-md border border-zinc-300 bg-white px-3 py-1.5 text-[13px] text-zinc-900 shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500/60 disabled:opacity-60 dark:bg-zinc-900 dark:text-zinc-100 dark:border-zinc-700"
-                  data-testid={`friend-rename-input-${renamingId}`}
-                />
-                <Button
-                  onClick={() => void saveRename()}
-                  disabled={renameBusy}
-                  data-testid={`friend-rename-save-${renamingId}`}
-                >
-                  Save
-                </Button>
-                <Button variant="ghost" onClick={() => setRenamingId(null)} disabled={renameBusy}>
-                  Cancel
-                </Button>
-              </div>
+            {friendDownloads.length > 0 ? (
+              <h3 className="text-[11px] font-semibold uppercase tracking-widest text-zinc-400 dark:text-zinc-500">
+                On the server
+              </h3>
             ) : null}
-
-            <div className="flex gap-2">
-              <input
-                value={friendLink}
-                onChange={(e) => setFriendLink(e.target.value)}
-                placeholder="Link to send…"
-                aria-label="Link to send to friend"
-                spellCheck={false}
-                autoComplete="off"
-                disabled={state !== "connected" || !sendTarget}
-                className="min-w-0 flex-1 rounded-md border border-zinc-300 bg-white px-3 py-2 font-mono text-[13px] text-zinc-900 shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500/60 disabled:opacity-60 dark:bg-zinc-900 dark:text-zinc-100 dark:border-zinc-700"
-                data-testid="friend-link-input"
+            {downloads.map((job) => (
+              <DownloadRow
+                key={job.id}
+                job={job}
+                checked={selected.has(job.id)}
+                onToggle={() => toggleSelected(job.id)}
+                expanded={expanded.has(job.id)}
+                onExpand={() => toggleExpanded(job.id)}
+                bridge={bridge}
               />
-              <Button
-                variant="ghost"
-                onClick={() => void pasteClipboard()}
-                disabled={pasteBusy || state !== "connected"}
-                data-testid="friend-paste"
-                title="Paste from clipboard"
-              >
-                Paste
-              </Button>
-              <Button
-                onClick={() => void sendToFriend()}
-                disabled={friendBusy || state !== "connected" || !sendTarget}
-                data-testid="send-to-friend"
-              >
-                Send
-              </Button>
-            </div>
-            {!sendTarget ? (
-              <p className="text-[11px] text-zinc-400 dark:text-zinc-600">Pick a friend above to enable sending.</p>
-            ) : null}
-            {friendMsg ? <p className="text-xs text-emerald-600 dark:text-emerald-400">{friendMsg}</p> : null}
-            {friendError ? <ErrorText>{friendError}</ErrorText> : null}
-            {sentEntries.length > 0 ? (
-              <div className="space-y-1.5 border-t border-zinc-200 pt-2 dark:border-zinc-800" data-testid="friend-sent-list">
-                <p className="text-[11px] font-semibold uppercase tracking-widest text-zinc-400 dark:text-zinc-500">
-                  Sent — check status on demand
-                </p>
-                {sentEntries.map((e) => (
-                  <div key={e.id} className="flex items-center gap-2 text-xs">
-                    <span className="min-w-0 flex-1 truncate font-mono text-zinc-500 dark:text-zinc-400" title={e.sourcePreview}>
-                      → {e.targetName}: {e.sourcePreview}
-                    </span>
-                    <span className="shrink-0 text-zinc-600 dark:text-zinc-300" data-testid={`friend-status-${e.id}`}>
-                      {e.status ? describeSentState(e.status) : "Sent — not checked yet"}
-                    </span>
-                    <Button
-                      variant="ghost"
-                      className="shrink-0 px-2 py-0.5 text-xs"
-                      onClick={() => void checkSentStatus(e.id)}
-                      disabled={e.checking || state !== "connected"}
-                      data-testid={`friend-status-check-${e.id}`}
-                    >
-                      {e.checking ? "Checking…" : "Check"}
-                    </Button>
-                  </div>
-                ))}
-                <p className="text-[11px] text-zinc-400 dark:text-zinc-600">
-                  Status is fetched only when you press Check — never polled. Percent and
-                  speed come from your friend's app (magnet links only); if they're offline
-                  you'll see the last report they sent.
-                </p>
-              </div>
-            ) : null}
+            ))}
           </div>
         )}
 
-        {showAdd ? (
-          <div className="mt-3 rounded-md border border-zinc-200 p-3 dark:border-zinc-700" data-testid="add-friend-panel">
-            {available.length === 0 ? (
-              <p className="text-xs text-zinc-500 dark:text-zinc-400">
-                No other paired clients found on the server.
-              </p>
-            ) : (
-              <>
-                <select
-                  value={pickId}
-                  onChange={(e) => setPickId(e.target.value)}
-                  className="w-full rounded-md border border-zinc-300 bg-white px-2 py-1.5 text-sm dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
-                  aria-label="Choose paired client"
-                  data-testid="add-friend-select"
-                >
-                  {available.map((c) => (
-                    <option key={c.clientId} value={c.clientId}>
-                      {c.name}
-                    </option>
-                  ))}
-                </select>
-                <div className="mt-2 flex justify-end gap-2">
-                  <Button variant="ghost" onClick={() => setShowAdd(false)}>
-                    Cancel
-                  </Button>
-                  <Button onClick={addFriend} disabled={!pickId} data-testid="add-friend-confirm">
-                    Add
-                  </Button>
-                </div>
-              </>
-            )}
+        {selectedJobs.length > 0 ? (
+          <div className="mt-3 flex flex-wrap items-center justify-end gap-2 border-t border-zinc-100 pt-3 dark:border-zinc-800">
+            <Button variant="danger" onClick={() => void deleteSelected()} data-testid="delete-downloads">
+              Delete
+            </Button>
+            <Button
+              onClick={() => setOrderIds(selectedJobs.map((job) => job.id))}
+              disabled={!canOrder}
+              title={canOrder ? undefined : "Only finished downloads can go into an order."}
+              data-testid="order-selected"
+            >
+              Add to Order
+            </Button>
           </div>
         ) : null}
+
+        <ErrorText>{actionError ?? listError}</ErrorText>
       </Panel>
+
+      <Panel className="mt-4">
+        <SectionTitle>Orders</SectionTitle>
+        {orders.length === 0 ? (
+          <EmptyState
+            title="No orders yet"
+            detail="Add a torrent to an order, or combine finished downloads into one."
+          />
+        ) : (
+          <div className="space-y-2">
+            {orders.map((job) => (
+              <OrderRow
+                key={job.id}
+                job={job}
+                jobs={jobs ?? []}
+                expanded={expanded.has(job.id)}
+                onExpand={() => toggleExpanded(job.id)}
+                bridge={bridge}
+                onDismiss={() => void dismissOrder(job)}
+                onCopy={copy}
+                onOpen={open}
+              />
+            ))}
+          </div>
+        )}
+      </Panel>
+
+      <OrderConfirmModal
+        open={orderIds !== null}
+        jobIds={orderIds ?? []}
+        bridge={bridge}
+        onClose={() => setOrderIds(null)}
+        onDone={() => {
+          setOrderIds(null);
+          setSelected(new Set());
+          void reload();
+        }}
+      />
     </div>
+  );
+}
+
+function stateLabel(job: JobSnapshot): string {
+  switch (job.state) {
+    case "queued":
+      return "Queued";
+    case "downloading":
+      return "Downloading";
+    case "packaging":
+      return "Packaging";
+    case "uploading":
+      return "Uploading";
+    case "finalizing":
+      return "Finalizing";
+    case "complete":
+      return job.goal === "download" ? "Downloaded — waiting for order" : "Complete";
+    case "failed":
+      return "Failed";
+    case "cancelled":
+      return "Cancelled";
+    case "interrupted":
+      return "Interrupted";
+    default:
+      return job.state;
+  }
+}
+
+function toneFor(job: JobSnapshot): "neutral" | "green" | "amber" | "red" | "blue" {
+  if (job.state === "complete") return "green";
+  if (job.state === "failed") return "red";
+  if (job.state === "cancelled" || job.state === "interrupted") return "amber";
+  if (job.state === "queued") return "neutral";
+  return "blue";
+}
+
+function DownloadRow({
+  job,
+  checked,
+  onToggle,
+  expanded,
+  onExpand,
+  bridge,
+}: {
+  job: JobSnapshot;
+  checked: boolean;
+  onToggle: () => void;
+  expanded: boolean;
+  onExpand: () => void;
+  bridge: VikingBridge | null;
+}) {
+  const t = job.telemetry ?? null;
+  const name = job.metadata?.name ?? job.source.value;
+  return (
+    <div
+      className="rounded-md border border-zinc-200 px-2.5 py-2 dark:border-zinc-800"
+      data-testid={`download-${job.id}`}
+    >
+      <div className="flex items-center gap-2">
+        <input
+          type="checkbox"
+          checked={checked}
+          onChange={onToggle}
+          aria-label={`Select ${name}`}
+          className="h-3.5 w-3.5 shrink-0 accent-blue-600"
+        />
+        <button
+          type="button"
+          className="min-w-0 flex-1 truncate text-left text-[13px] font-medium text-zinc-800 hover:underline dark:text-zinc-200"
+          title={name}
+          onClick={onExpand}
+        >
+          {name}
+        </button>
+        <Badge tone={toneFor(job)}>{stateLabel(job)}</Badge>
+      </div>
+      <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 pl-5 text-[11px] tabular-nums text-zinc-500 dark:text-zinc-400">
+        {job.selectedBytes != null ? <span>{formatBytes(job.selectedBytes)}</span> : null}
+        {t ? (
+          <>
+            <span>{formatPercent(t.progressPct)}</span>
+            <span>{formatSpeed(t.speedBps)}</span>
+            {t.etaSeconds != null ? <span>ETA {formatEta(t.etaSeconds)}</span> : null}
+            <span>Seeds {t.seeds}</span>
+            <span>Peers {t.peers}</span>
+          </>
+        ) : null}
+        {job.error ? <span className="text-red-600 dark:text-red-400">{job.error.message}</span> : null}
+      </div>
+      {t ? (
+        <div className="mt-1.5 pl-5">
+          <ProgressBar pct={t.progressPct} label={`${name} download progress`} />
+        </div>
+      ) : null}
+      {expanded ? (
+        <div className="mt-3 border-t border-zinc-100 pt-3 dark:border-zinc-800">
+          <JobDetail
+            job={job}
+            onCancel={bridge ? () => void bridge.cancelJob(job.id) : undefined}
+            onRetryPackaging={bridge ? () => void bridge.retryPackaging(job.id) : undefined}
+            onRetryUpload={bridge ? () => void bridge.retryUpload(job.id) : undefined}
+            showCancel={false}
+          />
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function FriendDownloadRow({ item }: { item: SentDirectJobStatus }) {
+  const pct = item.progress?.progressPct ?? null;
+  return (
+    <div
+      className="rounded-md border border-zinc-200 px-2.5 py-2 dark:border-zinc-800"
+      data-testid={`friend-download-${item.id}`}
+    >
+      <div className="flex items-center gap-2 text-[13px]">
+        <span className="min-w-0 flex-1 truncate font-mono text-zinc-600 dark:text-zinc-300" title={item.sourcePreview ?? undefined}>
+          → {item.targetName}: {item.sourcePreview ?? "link"}
+        </span>
+        <Badge tone={item.state === "accepted" ? "blue" : "neutral"}>
+          {item.state === "queued" ? "Waiting for friend" : "Downloading on friend's PC"}
+        </Badge>
+      </div>
+      {pct != null ? (
+        <div className="mt-1.5">
+          <ProgressBar pct={pct} label={`${item.targetName} download progress`} />
+        </div>
+      ) : null}
+      <div className="mt-1 flex gap-3 text-[11px] tabular-nums text-zinc-500 dark:text-zinc-400">
+        {pct != null ? <span>{formatPercent(pct)}</span> : null}
+        {item.progress?.dlSpeedBps != null ? <span>{formatSpeed(item.progress.dlSpeedBps)}</span> : null}
+        {item.selection?.length ? <span>{item.selection.length} files selected</span> : null}
+      </div>
+    </div>
+  );
+}
+
+function OrderRow({
+  job,
+  jobs,
+  expanded,
+  onExpand,
+  bridge,
+  onDismiss,
+  onCopy,
+  onOpen,
+}: {
+  job: JobSnapshot;
+  jobs: JobSnapshot[];
+  expanded: boolean;
+  onExpand: () => void;
+  bridge: VikingBridge | null;
+  onDismiss: () => void;
+  onCopy: (text: string) => Promise<void>;
+  onOpen: (text: string) => Promise<void>;
+}) {
+  const name = job.metadata?.name ?? "Order";
+  const bundled = (job.bundleJobIds ?? [])
+    .map((id) => jobs.find((j) => j.id === id))
+    .filter((j): j is JobSnapshot => Boolean(j));
+  return (
+    <div
+      className="rounded-md border border-zinc-200 px-2.5 py-2 dark:border-zinc-800"
+      data-testid={`order-${job.id}`}
+    >
+      <div className="flex items-center gap-2">
+        <button
+          type="button"
+          className="min-w-0 flex-1 truncate text-left text-[13px] font-medium text-zinc-800 hover:underline dark:text-zinc-200"
+          title={name}
+          onClick={onExpand}
+        >
+          {name}
+        </button>
+        <Badge tone={toneFor(job)}>{stateLabel(job)}</Badge>
+        <Button
+          variant="ghost"
+          className="shrink-0 px-2 py-0.5 text-xs"
+          onClick={onDismiss}
+          data-testid={`dismiss-order-${job.id}`}
+        >
+          Dismiss
+        </Button>
+      </div>
+      <div className="mt-1 pl-0 text-[11px] tabular-nums text-zinc-500 dark:text-zinc-400">
+        {job.bundleJobIds?.length
+          ? `${job.bundleJobIds.length} download${job.bundleJobIds.length === 1 ? "" : "s"} · `
+          : ""}
+        {job.selectedBytes != null ? formatBytes(job.selectedBytes) : ""}
+        {job.error ? ` · ${job.error.message}` : ""}
+      </div>
+      {job.result?.url ? (
+        <div className="mt-2 space-y-2">
+          <input
+            readOnly
+            value={job.result.url}
+            aria-label="Viking URL"
+            onFocus={(e) => e.currentTarget.select()}
+            className="w-full cursor-text rounded-md border border-zinc-300 bg-zinc-50 px-2 py-1 font-mono text-[11px] text-zinc-600 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-300"
+          />
+          <div className="flex flex-wrap gap-2">
+            <Button
+              variant="ghost"
+              className="px-2 py-0.5 text-xs"
+              onClick={() => void onCopy(job.result!.url)}
+            >
+              Copy Link
+            </Button>
+            <Button
+              variant="ghost"
+              className="px-2 py-0.5 text-xs"
+              onClick={() => void onOpen(job.result!.url)}
+            >
+              Open Link
+            </Button>
+            {job.result.directUrl ? (
+              <>
+                <Button
+                  variant="ghost"
+                  className="px-2 py-0.5 text-xs"
+                  onClick={() => void onCopy(job.result!.directUrl!)}
+                >
+                  Copy Direct Link
+                </Button>
+                <Button
+                  variant="ghost"
+                  className="px-2 py-0.5 text-xs"
+                  onClick={() => void onOpen(job.result!.directUrl!)}
+                >
+                  Open Direct Link
+                </Button>
+              </>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
+      {expanded ? (
+        <div className="mt-3 border-t border-zinc-100 pt-3 dark:border-zinc-800">
+          {bundled.length > 0 ? (
+            <div className="mb-3">
+              <p className="mb-1 text-[11px] font-semibold uppercase tracking-widest text-zinc-400 dark:text-zinc-500">
+                Downloads in this order
+              </p>
+              <ul className="space-y-1 text-xs text-zinc-600 dark:text-zinc-300">
+                {bundled.map((source) => (
+                  <li key={source.id} className="truncate">
+                    {source.metadata?.name ?? source.source.value} · {stateLabel(source)}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+          <JobDetail
+            job={job}
+            onRetryPackaging={bridge ? () => void bridge.retryPackaging(job.id) : undefined}
+            onRetryUpload={bridge ? () => void bridge.retryUpload(job.id) : undefined}
+            showCancel={false}
+          />
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function OrderConfirmModal({
+  open,
+  jobIds,
+  bridge,
+  onClose,
+  onDone,
+}: {
+  open: boolean;
+  jobIds: string[];
+  bridge: VikingBridge | null;
+  onClose: () => void;
+  onDone: () => void;
+}) {
+  const [preflight, setPreflight] = useState<Awaited<ReturnType<VikingBridge["preflightOrder"]>> | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [cleanup, setCleanup] = useState({ deleteTorrent: true, deleteFiles: true, deleteZip: true });
+
+  useEffect(() => {
+    if (!open || !bridge) return;
+    let alive = true;
+    setPreflight(null);
+    setError(null);
+    setLoading(true);
+    void bridge
+      .preflightOrder(jobIds)
+      .then((next) => {
+        if (alive) setPreflight(next);
+      })
+      .catch((err) => {
+        if (alive) setError(err instanceof Error ? err.message : "Could not check storage.");
+      })
+      .finally(() => {
+        if (alive) setLoading(false);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [open, bridge, jobIds]);
+
+  const blocked = preflight ? preflight.blocked === true : true;
+
+  const confirm = async (): Promise<void> => {
+    if (!bridge) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await bridge.createOrder(jobIds, cleanup);
+      onDone();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not create the order.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Modal open={open} onClose={onClose} title="Add to order" wide>
+      <div className="space-y-4">
+        <p className="text-sm text-zinc-600 dark:text-zinc-300">
+          {jobIds.length === 1
+            ? "1 finished download will be ordered. One file uploads directly; several files are packaged first."
+            : `${jobIds.length} finished downloads will be packaged into one ZIP and uploaded.`}{" "}
+          Already-downloaded files are not downloaded again.
+        </p>
+
+        {loading ? (
+          <p className="flex items-center gap-2 text-sm text-zinc-500 dark:text-zinc-400">
+            <Spinner /> Checking server storage…
+          </p>
+        ) : null}
+
+        <StorageCheck preflight={preflight} />
+
+        <Panel>
+          <SectionTitle>After upload</SectionTitle>
+          <div className="space-y-1.5 text-sm text-zinc-700 dark:text-zinc-300">
+            {(
+              [
+                ["deleteTorrent", "Delete torrents from qBittorrent"],
+                ["deleteFiles", "Delete downloaded files from disk"],
+                ["deleteZip", "Delete temporary ZIP"],
+              ] as const
+            ).map(([key, label]) => (
+              <label key={key} className="flex cursor-pointer items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={cleanup[key]}
+                  onChange={(e) => setCleanup((c) => ({ ...c, [key]: e.target.checked }))}
+                  className="h-4 w-4"
+                  data-testid={`order-cleanup-${key}`}
+                />
+                {label}
+              </label>
+            ))}
+          </div>
+        </Panel>
+
+        <ErrorText>{error}</ErrorText>
+
+        <div className="flex justify-end gap-2">
+          <Button variant="ghost" onClick={onClose} disabled={busy}>
+            Cancel
+          </Button>
+          <Button onClick={() => void confirm()} disabled={busy || loading || blocked} data-testid="confirm-order">
+            {busy ? <Spinner /> : null}
+            Add to Order
+          </Button>
+        </div>
+      </div>
+    </Modal>
   );
 }

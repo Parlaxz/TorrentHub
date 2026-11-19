@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { JobSnapshotSchema } from './domain'
+import { JobGoalSchema, JobSnapshotSchema } from './domain'
 
 // ---------------------------------------------------------------------------
 // Route table — the CANONICAL wire API served by the relay (A6) and consumed
@@ -11,14 +11,19 @@ export const ApiRoutes = {
   pair: '/v1/pair',
   intakes: '/v1/intakes',
   intakeById: (intakeId: string): string => `/v1/intakes/${encodeURIComponent(intakeId)}`,
+  jobPreflight: '/v1/jobs/preflight',
   jobs: '/v1/jobs',
   jobById: (jobId: string): string => `/v1/jobs/${encodeURIComponent(jobId)}`,
   cancelJob: (jobId: string): string => `/v1/jobs/${encodeURIComponent(jobId)}/cancel`,
+  dismissJob: (jobId: string): string => `/v1/jobs/${encodeURIComponent(jobId)}/dismiss`,
+  discardJob: (jobId: string): string => `/v1/jobs/${encodeURIComponent(jobId)}/discard`,
   retryPackaging: (jobId: string): string =>
     `/v1/jobs/${encodeURIComponent(jobId)}/retry-packaging`,
   retryUpload: (jobId: string): string => `/v1/jobs/${encodeURIComponent(jobId)}/retry-upload`,
   recheckStorage: (jobId: string): string =>
     `/v1/jobs/${encodeURIComponent(jobId)}/recheck-storage`,
+  orders: '/v1/orders',
+  orderPreflight: '/v1/orders/preflight',
   history: '/v1/history',
   serverStatus: '/v1/server/status',
   clients: '/v1/clients',
@@ -114,9 +119,42 @@ export const CreateJobRequestSchema = z.object({
   intakeId: z.string().min(1),
   selection: z.array(z.number().int().min(0)).min(1).optional(),
   zipRequired: z.boolean().nullish(),
+  goal: JobGoalSchema.optional(),
+  cleanup: z
+    .object({
+      deleteTorrent: z.boolean().optional(),
+      deleteFiles: z.boolean().optional(),
+      deleteZip: z.boolean().optional()
+    })
+    .optional(),
   idempotencyKey: z.string().min(1).max(128).nullish()
 })
 export type CreateJobRequest = z.infer<typeof CreateJobRequestSchema>
+
+/** Ad-hoc storage check before committing a selection or a bundle order. */
+export const JobPreflightRequestSchema = z.object({
+  intakeId: z.string().min(1),
+  selection: z.array(z.number().int().min(0)).min(1),
+  goal: JobGoalSchema.optional()
+})
+export type JobPreflightRequest = z.infer<typeof JobPreflightRequestSchema>
+
+export const OrderPreflightRequestSchema = z.object({
+  jobIds: z.array(z.string().min(1)).min(1).max(50)
+})
+export type OrderPreflightRequest = z.infer<typeof OrderPreflightRequestSchema>
+
+export const CreateOrderRequestSchema = z.object({
+  jobIds: z.array(z.string().min(1)).min(1).max(50),
+  cleanup: z
+    .object({
+      deleteTorrent: z.boolean().optional(),
+      deleteFiles: z.boolean().optional(),
+      deleteZip: z.boolean().optional()
+    })
+    .optional()
+})
+export type CreateOrderRequest = z.infer<typeof CreateOrderRequestSchema>
 
 /**
  * POST /v1/jobs responds with the job snapshot plus an optional authoritative

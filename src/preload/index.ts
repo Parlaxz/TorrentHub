@@ -68,9 +68,26 @@ const clientBridge = {
   getDraft: (jobId: string) => ipcRenderer.invoke(ClientIpc.getDraft, jobId),
   cancelJob: (jobId: string) => ipcRenderer.invoke(ClientIpc.cancelJob, jobId),
 
-  confirmSelection: (jobId: string, fileIndexes: number[], cleanup?: { deleteTorrent?: boolean; deleteFiles?: boolean; deleteZip?: boolean }) =>
-    ipcRenderer.invoke(ClientIpc.confirmSelection, jobId, fileIndexes, cleanup),
-  startJob: (jobId: string) => ipcRenderer.invoke(ClientIpc.startJob, jobId),
+  confirmSelection: (jobId: string, fileIndexes: number[], goal?: 'order' | 'download') =>
+    ipcRenderer.invoke(ClientIpc.preflightSelection, jobId, fileIndexes, goal),
+  preflightSelection: (jobId: string, fileIndexes: number[], goal?: 'order' | 'download') =>
+    ipcRenderer.invoke(ClientIpc.preflightSelection, jobId, fileIndexes, goal),
+  startJob: (
+    jobId: string,
+    options: {
+      selection: number[]
+      goal: 'order' | 'download'
+      cleanup?: { deleteTorrent?: boolean; deleteFiles?: boolean; deleteZip?: boolean }
+    },
+  ) => ipcRenderer.invoke(ClientIpc.startJob, jobId, options),
+  listJobs: () => ipcRenderer.invoke(ClientIpc.listJobs),
+  preflightOrder: (jobIds: string[]) => ipcRenderer.invoke(ClientIpc.preflightOrder, jobIds),
+  createOrder: (
+    jobIds: string[],
+    cleanup?: { deleteTorrent?: boolean; deleteFiles?: boolean; deleteZip?: boolean },
+  ) => ipcRenderer.invoke(ClientIpc.createOrder, jobIds, cleanup),
+  dismissJob: (jobId: string) => ipcRenderer.invoke(ClientIpc.dismissJob, jobId),
+  discardJob: (jobId: string) => ipcRenderer.invoke(ClientIpc.discardJob, jobId),
   getJob: (jobId: string) => ipcRenderer.invoke(ClientIpc.getJob, jobId),
   retryPackaging: (jobId: string) => ipcRenderer.invoke(ClientIpc.retryPackaging, jobId),
   retryUpload: (jobId: string) => ipcRenderer.invoke(ClientIpc.retryUpload, jobId),
@@ -79,8 +96,8 @@ const clientBridge = {
 
   listHistory: () => ipcRenderer.invoke(ClientIpc.listHistory),
   clientsList: () => ipcRenderer.invoke(ClientIpc.clientsList),
-  sendToFriend: (source: string, targetClientId: string) =>
-    ipcRenderer.invoke(ClientIpc.sendToFriend, source, targetClientId),
+  sendToFriend: (source: string, targetClientId: string, selection?: number[]) =>
+    ipcRenderer.invoke(ClientIpc.sendToFriend, source, targetClientId, selection),
   friendsGet: () => ipcRenderer.invoke(ClientIpc.friendsGet),
   friendsAdd: (friend: { clientId: string; name: string }) =>
     ipcRenderer.invoke(ClientIpc.friendsAdd, friend),

@@ -353,19 +353,34 @@ export class ServerController implements VikingRelayServerBridge {
   async sendDirectJob(
     source: string,
     targetClientId: string,
+    selection: number[] | null = null,
   ): Promise<{ ok: boolean; id?: string; error?: string }> {
     if (!this.#directJobs) return { ok: false, error: 'direct jobs unavailable' };
     const value = String(source ?? '').trim();
     let kind: 'magnet' | 'url' | 'direct';
     if (value.startsWith('magnet:')) kind = 'magnet';
-    else if (/^https?:\/\//i.test(value)) kind = 'url';
-    else return { ok: false, error: 'enter a magnet or http(s) link' };
+    else if (/^https?:\/\//i.test(value)) {
+      let path = value;
+      try {
+        path = new URL(value).pathname;
+      } catch {
+        /* keep the raw value */
+      }
+      kind = /\.torrent$/i.test(path) ? 'url' : 'direct';
+    } else return { ok: false, error: 'enter a magnet or http(s) link' };
 
     const target = await this.listPairedClients();
     const client = target.find((c) => c.clientId === targetClientId);
     if (!client) return { ok: false, error: 'that client is no longer paired' };
 
-    const job = await this.#directJobs.add(value, kind, client.clientId, client.name);
+    const job = await this.#directJobs.add(
+      value,
+      kind,
+      client.clientId,
+      client.name,
+      undefined,
+      selection,
+    );
     this.#host.log.info({ jobId: job.id, target: client.name }, 'direct job sent');
     return { ok: true, id: job.id };
   }

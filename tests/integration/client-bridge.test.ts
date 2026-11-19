@@ -118,8 +118,8 @@ describe('integration: client bridge over a real relay', () => {
       assert.equal(draft.state, 'awaiting_selection');
       assert.equal(draft.metadata?.files.length, 2);
 
-      // Confirm selection → authoritative preflight (engine started transfer).
-      const confirmed = await client.confirmSelection(jobId, [1, 0]);
+      // Preflight is side-effect free; commit selection starts the transfer.
+      const confirmed = await client.preflightSelection(jobId, [1, 0], 'order');
       assert.equal(confirmed.ok, true);
       if (confirmed.ok) {
         assert.equal(confirmed.value.selectedFiles, 2);
@@ -127,8 +127,7 @@ describe('integration: client bridge over a real relay', () => {
         assert.ok(confirmed.value.tempZipBytes !== null);
       }
 
-      // startJob replay is idempotent: same job, no duplicate transfer.
-      await client.startJob(jobId);
+      await client.startJob(jobId, { selection: [1, 0], goal: 'order' });
 
       let job = await client.getJob(jobId);
       for (let i = 0; i < 200 && job.state !== 'complete'; i += 1) {

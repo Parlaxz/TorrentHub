@@ -8,7 +8,18 @@
  * nonterminal jobs from previous sessions as 'interrupted' and does NOT
  * inspect qBittorrent or resume any stage.
  */
-import type { CleanupPolicy, FailureKind, IntakeSource, JobRecord, StageName, TorrentMetadataInfo } from "./types.ts";
+import type {
+  BundleEntry,
+  CleanupPolicy,
+  FailureKind,
+  IntakeSource,
+  JobGoal,
+  JobRecord,
+  PreflightView,
+  StageName,
+  StorageView,
+  TorrentMetadataInfo,
+} from "./types.ts";
 import { STAGE_NAMES, initialStageMap, isTerminalJobState } from "./types.ts";
 import {
   InsufficientSpaceError,
@@ -200,6 +211,7 @@ export class JobEngine {
     selectedIndexes: number[],
     idempotencyKey?: string | null,
     cleanupOverrides?: Partial<CleanupPolicy> | null,
+    goal: JobGoal = "order",
   ): Promise<JobRecord> {
     const record = await this.#require(jobId);
     const key = normalizeIdempotencyKey(idempotencyKey);
@@ -215,26 +227,23 @@ export class JobEngine {
     if (record.state !== "awaiting_selection") {
       throw new InvalidTransitionError(`cannot commit selection in state '${record.state}'`);
     }
-    if (this.#activeTransferJobId !== null) {
-      throw new InvalidTransitionError("another transfer is active; V1 allows one at a time");
-    }
     if (!record.metadata) throw new InvalidTransitionError("job has no metadata");
 
-    const indexes = [...new Set(selectedIndexes)].sort((a, b) => a - b);
-    if (indexes.length === 0) {
-      throw new InvalidTransitionError("selection must contain at least one file");
-    }
-    const known = new Set(record.metadata.files.map((f) => f.index));
-    const unknown = indexes.filter((i) => !known.has(i));
-    if (unknown.length > 0) {
-      throw new InvalidTransitionError(`unknown file indexes: ${unknown.join(", ")}`);
-    }
-
+    const indexes = this.#normalizeSelection(record, selectedIndexes);
     const selectedBytes = record.metadata.files
       .filter((f) => indexes.includes(f.index))
       .reduce((sum, f) => sum + f.sizeBytes, 0);
-    const zipRequired = indexes.length > 1;
+    // A download-list job never packages, so it only needs the download itself.
+    const zipRequired = goal === "order" && indexes.length > 1;
 
+    const { view: preflight, storage } = await this.#computePreflight(
+      jobId,
+      selectedBytes,
+      indexes.length,
+      zipRequired,
+    );
+
+    record.goal = goal;
     record.selection = indexes;
     record.selectedBytes = selectedBytes;
     record.zipRequired = zipRequired;
@@ -244,79 +253,28 @@ export class JobEngine {
       deleteFiles: cleanupOverrides?.deleteFiles ?? this.#config.cleanupDefaults.deleteFiles,
       deleteZip: cleanupOverrides?.deleteZip ?? this.#config.cleanupDefaults.deleteZip,
     };
+    record.stages.preflight = preflight.blocked ? "failed" : "complete";
+    record.preflight = preflight;
+    record.storage = storage;
 
-    // ---- disk preflight: reject Start if peak space is unsafe ----
-    // The storage adapter applies the authoritative disk-space policy
-    // (estimated ZIP bytes + safety reserve + peak) from these canonical
-    // selection facts; requiredBytes/safetyReserveBytes are legacy fallbacks.
-    record.stages.preflight = "active";
-    const peakBytes = selectedBytes + (zipRequired ? selectedBytes : 0);
-    const verdict = await this.#deps.storage.preflight({
-      path: this.#config.jobsRoot,
-      requiredBytes: peakBytes,
-      safetyReserveBytes: this.#config.safetyReserveBytes,
-      selectedBytes,
-      fileCount: indexes.length,
-      zipRequired,
-    });
-    const freeForView = verdict.freeBytes;
-    const requiredForView =
-      verdict.requiredPeakBytes ?? peakBytes + this.#config.safetyReserveBytes;
-    const deficitForView =
-      freeForView !== null ? Math.max(0, requiredForView - freeForView) : null;
-    const blocked = !verdict.ok;
-    // Unknown free space is NOT insufficiency: the policy is "proceed without
-    // blocking" when the volume cannot be stat'd. Treating null as failure
-    // produced "Blocked — need 0 GB more" on healthy disks.
-    const unknownFree = freeForView === null && !blocked;
-    record.preflight = {
-      selectedFiles: indexes.length,
-      selectedBytes,
-      tempZipBytes: zipRequired ? (verdict.estimatedZipBytes ?? selectedBytes) : null,
-      safetyReserveBytes: verdict.safetyReserveBytes ?? this.#config.safetyReserveBytes,
-      peakRequiredBytes: requiredForView,
-      serverFreeBytes: freeForView,
-      enough: !blocked && (unknownFree || deficitForView === 0),
-      missingBytes: blocked ? (verdict.deficitBytes ?? deficitForView ?? 0) : 0,
-      blocked,
-    };
-    this.#log?.info(
-      {
-        jobId: record.id,
-        status: blocked ? 'blocked' : unknownFree ? 'unknown-free' : 'ok',
-        freeBytes: freeForView,
-        requiredPeakBytes: requiredForView,
-        zipRequired,
-      },
-      'storage preflight',
-    );
-    if (!verdict.ok) {
-      record.stages.preflight = "failed";
+    if (preflight.blocked) {
       record.error = {
         kind: "storage_preflight",
-        message: verdict.reason ?? "insufficient disk space for this selection",
+        message:
+          preflight.missingBytes && preflight.missingBytes > 0
+            ? `insufficient disk space: need about ${preflight.missingBytes} more bytes`
+            : "insufficient disk space for this selection",
         insufficientSpace: true,
       };
-      await this.#save(record); // stays awaiting_selection; user can retry Start
+      await this.#save(record); // stays awaiting_selection; user can retry
       throw new InsufficientSpaceError(
         record.error.message,
-        requiredForView,
-        freeForView,
+        preflight.peakRequiredBytes ?? 0,
+        preflight.serverFreeBytes,
       );
     }
-    record.storage = {
-      freeBytes: verdict.freeBytes,
-      remainingDownloadBytes: selectedBytes,
-      zipReservationBytes: zipRequired ? (verdict.estimatedZipBytes ?? selectedBytes) : null,
-      safetyReserveBytes: verdict.safetyReserveBytes ?? this.#config.safetyReserveBytes,
-      projectedHeadroomBytes:
-        verdict.freeBytes !== null
-          ? verdict.freeBytes - requiredForView
-          : null,
-      warning: "none",
-    };
-    record.stages.preflight = "complete";
 
+    record.error = null;
     // ---- per-job directory ----
     const dirs = await this.#deps.workspace.createJobDirs(jobId);
     record.jobDir = dirs.jobDir;
@@ -330,6 +288,134 @@ export class JobEngine {
 
     this.#startTransfer(record);
     return record;
+  }
+
+  /** Ad-hoc storage check. No job mutation, no transfer start. */
+  async preflightSelection(
+    jobId: string,
+    selectedIndexes: number[],
+    goal: JobGoal = "order",
+  ): Promise<PreflightView> {
+    const record = await this.#require(jobId);
+    if (!record.metadata) throw new InvalidTransitionError("job has no metadata");
+    if (record.state !== "awaiting_selection") {
+      if (record.preflight) return record.preflight;
+      throw new InvalidTransitionError(`cannot preflight selection in state '${record.state}'`);
+    }
+    const indexes = this.#normalizeSelection(record, selectedIndexes);
+    const selectedBytes = record.metadata.files
+      .filter((f) => indexes.includes(f.index))
+      .reduce((sum, f) => sum + f.sizeBytes, 0);
+    const { view } = await this.#computePreflight(
+      jobId,
+      selectedBytes,
+      indexes.length,
+      goal === "order" && indexes.length > 1,
+    );
+    return view;
+  }
+
+  /**
+   * Create an order from already-finished download-list jobs. The order skips
+   * the download stage and packages the selected files of every source into
+   * one ZIP, then uploads it.
+   */
+  async createOrder(
+    jobIds: string[],
+    clientId: string | null = null,
+    cleanupOverrides?: Partial<CleanupPolicy> | null,
+  ): Promise<JobRecord> {
+    const { entries, sources, selectedBytes } = await this.#collectBundleEntries(jobIds);
+    const id = newJobId();
+    const zipRequired = entries.length > 1;
+    const { view: preflight, storage } = await this.#computePreflight(
+      id,
+      selectedBytes,
+      entries.length,
+      zipRequired,
+    );
+    if (preflight.blocked) {
+      throw new InsufficientSpaceError(
+        "insufficient disk space to package this order",
+        preflight.peakRequiredBytes ?? 0,
+        preflight.serverFreeBytes,
+      );
+    }
+
+    const now = new Date().toISOString();
+    const record: JobRecord = {
+      id,
+      createdAt: now,
+      updatedAt: now,
+      state: "queued",
+      source: {
+        kind: "bundle",
+        value: `${jobIds.length} download${jobIds.length === 1 ? "" : "s"}`,
+      },
+      goal: "order",
+      bundleJobIds: [...jobIds],
+      bundleEntries: entries,
+      clientId,
+      metadata: {
+        name: `Order ${now.slice(0, 16).replace("T", " ").replace(/:/g, "-")}`,
+        files: entries.map((e, index) => ({
+          index,
+          path: e.archiveRelativePath,
+          sizeBytes: e.sizeBytes,
+        })),
+        totalSizeBytes: selectedBytes,
+      },
+      selection: entries.map((_, index) => index),
+      selectedBytes,
+      zipRequired,
+      directSourcePath: zipRequired ? null : entries[0].absoluteSourcePath,
+      completedFiles: entries.map((e, index) => ({
+        index,
+        absolutePath: e.absoluteSourcePath,
+      })),
+      stages: {
+        ...initialStageMap(),
+        metadata: "complete",
+        selection: "complete",
+        preflight: "complete",
+        download: "skipped",
+        packaging: zipRequired ? "waiting" : "skipped",
+      },
+      preflight,
+      storage,
+      cleanupPolicy: {
+        deleteTorrent:
+          cleanupOverrides?.deleteTorrent ?? this.#config.cleanupDefaults.deleteTorrent,
+        deleteFiles:
+          cleanupOverrides?.deleteFiles ?? this.#config.cleanupDefaults.deleteFiles,
+        deleteZip: cleanupOverrides?.deleteZip ?? this.#config.cleanupDefaults.deleteZip,
+      },
+    };
+
+    const dirs = await this.#deps.workspace.createJobDirs(id);
+    record.jobDir = dirs.jobDir;
+    record.downloadDir = dirs.downloadDir;
+    record.packageDir = dirs.packageDir;
+    await this.#save(record);
+
+    for (const source of sources) {
+      source.orderedByJobId = record.id;
+      await this.#save(source);
+    }
+    this.#startTransfer(record);
+    return record;
+  }
+
+  /** Storage check for a bundle order. No order is created. */
+  async preflightOrder(jobIds: string[]): Promise<PreflightView> {
+    const { entries, selectedBytes } = await this.#collectBundleEntries(jobIds);
+    const { view } = await this.#computePreflight(
+      "order-preflight",
+      selectedBytes,
+      entries.length,
+      entries.length > 1,
+    );
+    return view;
   }
 
   // ------------------------------------------------------------ control
@@ -346,12 +432,14 @@ export class JobEngine {
     return record;
   }
 
-  async cancel(jobId: string, options: CancelOptions = {}): Promise<JobRecord> {    const record = await this.#require(jobId);
+  async cancel(jobId: string, options: CancelOptions = {}): Promise<JobRecord> {
+    const record = await this.#require(jobId);
     if (isTerminalJobState(record.state)) return record;
 
     const live = this.#activePipeline;
     if (live && live.record.id === jobId) {
       await live.cancel(options);
+      await this.#releaseBundleSources(record);
       return record;
     }
 
@@ -362,6 +450,7 @@ export class JobEngine {
       case "awaiting_selection":
       case "queued":
         record.state = "cancelled";
+        await this.#releaseBundleSources(record);
         await this.#save(record);
         return record;
       default:
@@ -369,6 +458,51 @@ export class JobEngine {
           `no active pipeline for job '${jobId}' in state '${record.state}'`,
         );
     }
+  }
+
+  /** Hide an order from the list; an active order is stopped first. */
+  async dismiss(jobId: string): Promise<JobRecord> {
+    const record = await this.#require(jobId);
+    if (!isTerminalJobState(record.state)) {
+      await this.cancel(jobId);
+    }
+    // A completed order consumed its sources; only an unfinished one gives them back.
+    if (!record.result) await this.#releaseBundleSources(record);
+    const live = this.#activePipeline;
+    if (live && live.record.id === jobId) {
+      live.record.archived = true;
+      return live.record;
+    }
+    record.archived = true;
+    await this.#save(record);
+    return record;
+  }
+
+  /**
+   * Delete a parked download from the downloads list. Active jobs are
+   * cancelled with data cleanup; terminal jobs discard their artifacts.
+   */
+  async discardDownload(jobId: string): Promise<JobRecord> {
+    const record = await this.#require(jobId);
+    if (record.goal !== "download") {
+      throw new InvalidTransitionError("only downloads-list jobs can be discarded");
+    }
+    if (record.orderedByJobId) {
+      throw new InvalidTransitionError("this download is already in an order");
+    }
+    if (!isTerminalJobState(record.state)) {
+      await this.cancel(jobId, { cleanup: true });
+    } else {
+      await this.discardArtifacts(jobId);
+    }
+    const live = this.#activePipeline;
+    if (live && live.record.id === jobId) {
+      live.record.archived = true;
+      return live.record;
+    }
+    record.archived = true;
+    await this.#save(record);
+    return record;
   }
 
   /** Retry packaging after a packaging failure. Never redownloads. */
@@ -431,18 +565,163 @@ export class JobEngine {
     await this.#transferChain;
   }
 
+  // ------------------------------------------------------------ bundle/helpers
+
+  #normalizeSelection(record: JobRecord, selectedIndexes: number[]): number[] {
+    const indexes = [...new Set(selectedIndexes)].sort((a, b) => a - b);
+    if (indexes.length === 0) {
+      throw new InvalidTransitionError("selection must contain at least one file");
+    }
+    const known = new Set(record.metadata!.files.map((f) => f.index));
+    const unknown = indexes.filter((i) => !known.has(i));
+    if (unknown.length > 0) {
+      throw new InvalidTransitionError(`unknown file indexes: ${unknown.join(", ")}`);
+    }
+    return indexes;
+  }
+
+  async #computePreflight(
+    jobId: string,
+    selectedBytes: number,
+    fileCount: number,
+    zipRequired: boolean,
+  ): Promise<{ view: PreflightView; storage: StorageView }> {
+    const peakBytes = selectedBytes + (zipRequired ? selectedBytes : 0);
+    const verdict = await this.#deps.storage.preflight({
+      path: this.#config.jobsRoot,
+      requiredBytes: peakBytes,
+      safetyReserveBytes: this.#config.safetyReserveBytes,
+      selectedBytes,
+      fileCount,
+      zipRequired,
+    });
+    const freeForView = verdict.freeBytes;
+    const requiredForView =
+      verdict.requiredPeakBytes ?? peakBytes + this.#config.safetyReserveBytes;
+    const deficitForView =
+      freeForView !== null ? Math.max(0, requiredForView - freeForView) : null;
+    const blocked = !verdict.ok;
+    // Unknown free space is NOT insufficiency: the policy is "proceed without
+    // blocking" when the volume cannot be stat'd.
+    const unknownFree = freeForView === null && !blocked;
+    const view: PreflightView = {
+      selectedFiles: fileCount,
+      selectedBytes,
+      tempZipBytes: zipRequired ? (verdict.estimatedZipBytes ?? selectedBytes) : null,
+      safetyReserveBytes: verdict.safetyReserveBytes ?? this.#config.safetyReserveBytes,
+      peakRequiredBytes: requiredForView,
+      serverFreeBytes: freeForView,
+      enough: !blocked && (unknownFree || deficitForView === 0),
+      missingBytes: blocked ? (verdict.deficitBytes ?? deficitForView ?? 0) : 0,
+      blocked,
+    };
+    const storage: StorageView = {
+      freeBytes: verdict.freeBytes,
+      remainingDownloadBytes: selectedBytes,
+      zipReservationBytes: zipRequired ? (verdict.estimatedZipBytes ?? selectedBytes) : null,
+      safetyReserveBytes: verdict.safetyReserveBytes ?? this.#config.safetyReserveBytes,
+      projectedHeadroomBytes:
+        verdict.freeBytes !== null ? verdict.freeBytes - requiredForView : null,
+      warning: "none",
+    };
+    this.#log?.info(
+      {
+        jobId,
+        status: blocked ? "blocked" : unknownFree ? "unknown-free" : "ok",
+        freeBytes: freeForView,
+        requiredPeakBytes: requiredForView,
+        zipRequired,
+      },
+      "storage preflight",
+    );
+    return { view, storage };
+  }
+
+  async #collectBundleEntries(jobIds: string[]): Promise<{
+    entries: BundleEntry[];
+    sources: JobRecord[];
+    selectedBytes: number;
+  }> {
+    if (jobIds.length === 0) {
+      throw new InvalidTransitionError("select at least one downloaded job");
+    }
+    const sources: JobRecord[] = [];
+    for (const id of jobIds) {
+      const source = await this.#require(id);
+      if (source.goal !== "download") {
+        throw new InvalidTransitionError(`${id} is not a downloads-list job`);
+      }
+      if (source.state !== "complete") {
+        throw new InvalidTransitionError(`${id} has not finished downloading`);
+      }
+      if (source.orderedByJobId) {
+        throw new InvalidTransitionError(`${id} is already in an order`);
+      }
+      if (source.archived) {
+        throw new InvalidTransitionError(`${id} is archived`);
+      }
+      if (!source.metadata || !source.selection || !source.completedFiles) {
+        throw new InvalidTransitionError(`${id} has no completed files`);
+      }
+      sources.push(source);
+    }
+
+    const usedRoots = new Set<string>();
+    const entries: BundleEntry[] = [];
+    let selectedBytes = 0;
+    for (const source of sources) {
+      const originalRoot = source.metadata!.name.replace(/\\/g, "/").replace(/\/+$/, "");
+      const prefix = `${originalRoot}/`;
+      const root = uniqueRoot(sanitizeName(originalRoot), usedRoots);
+      const done = new Map((source.completedFiles ?? []).map((f) => [f.index, f.absolutePath]));
+      const meta = new Map(source.metadata!.files.map((f) => [f.index, f]));
+      for (const index of source.selection!) {
+        const file = meta.get(index);
+        const absolute = done.get(index);
+        if (!file || !absolute) continue;
+        const relative = file.path.startsWith(prefix)
+          ? file.path.slice(prefix.length)
+          : file.path;
+        entries.push({
+          absoluteSourcePath: absolute,
+          archiveRelativePath: `${root}/${relative}`,
+          sizeBytes: file.sizeBytes,
+          torrentFileIndex: index,
+        });
+        selectedBytes += file.sizeBytes;
+      }
+    }
+    if (entries.length === 0) {
+      throw new InvalidTransitionError("no completed files to order");
+    }
+    return { entries, sources, selectedBytes };
+  }
+
+  /** Give the source downloads back to the downloads list. */
+  async #releaseBundleSources(record: JobRecord): Promise<void> {
+    if (record.source.kind !== "bundle" || !record.bundleJobIds) return;
+    for (const id of record.bundleJobIds) {
+      const source = await this.#deps.repository.get(id).catch(() => null);
+      if (source && source.orderedByJobId === record.id) {
+        source.orderedByJobId = null;
+        await this.#save(source);
+      }
+    }
+  }
+
   // ------------------------------------------------------------ private
 
   #startTransfer(record: JobRecord): void {
-    const pipeline = new TransferPipeline(this.#pipelineDeps(), record);
-    this.#activePipeline = pipeline;
-    this.#activeTransferJobId = record.id;
-    // Sanitize the chain AFTER each run: a rejected link must never poison
-    // subsequent transfers (they would silently never execute and later be
-    // swept to "interrupted").
-    const run = this.#transferChain.then(() =>
-      this.#runTracked(pipeline, () => pipeline.run(), record.id),
-    );
+    const jobId = record.id;
+    const run = this.#transferChain.then(async () => {
+      // Re-read at pickup time so a queued cancel/archive wins the race.
+      const latest = await this.#require(jobId);
+      if (isTerminalJobState(latest.state) || latest.archived) return;
+      const pipeline = new TransferPipeline(this.#pipelineDeps(), latest);
+      this.#activePipeline = pipeline;
+      this.#activeTransferJobId = jobId;
+      await this.#runTracked(pipeline, () => pipeline.run(), jobId);
+    });
     this.#transferChain = run.then(
       () => undefined,
       () => undefined,
@@ -564,4 +843,21 @@ function kindForState(record: JobRecord): FailureKind {
     default:
       return "download";
   }
+}
+
+function sanitizeName(name: string): string {
+  const clean = name.replace(/[\\/:*?"<>|]/g, "_").replace(/\s+/g, " ").trim();
+  return clean.length > 0 ? clean.slice(0, 120) : "download";
+}
+
+/** Keep each source in its own top-level folder; suffix on collision. */
+function uniqueRoot(base: string, used: Set<string>): string {
+  let root = base;
+  let n = 2;
+  while (used.has(root.toLowerCase())) {
+    root = `${base} (${n})`;
+    n += 1;
+  }
+  used.add(root.toLowerCase());
+  return root;
 }

@@ -148,16 +148,55 @@ export function registerClientBridgeIpc(client: ClientRelayService): void {
   handle(ClientIpc.createIntake, (input: unknown) => client.createIntake(String(input ?? '')))
   handle(ClientIpc.getDraft, (jobId: unknown) => client.getDraft(String(jobId)))
   handle(ClientIpc.cancelJob, (jobId: unknown) => client.cancelJob(String(jobId)))
-  handle(ClientIpc.confirmSelection, (jobId: unknown, indexes: unknown, cleanup: unknown) =>
-    client.confirmSelection(
+  handle(ClientIpc.confirmSelection, (jobId: unknown, indexes: unknown, goal: unknown) =>
+    client.preflightSelection(
       String(jobId),
       Array.isArray(indexes) ? indexes.map((i) => Number(i)) : [],
+      goal === 'download' ? 'download' : 'order',
+    ),
+  )
+  handle(ClientIpc.preflightSelection, (jobId: unknown, indexes: unknown, goal: unknown) =>
+    client.preflightSelection(
+      String(jobId),
+      Array.isArray(indexes) ? indexes.map((i) => Number(i)) : [],
+      goal === 'download' ? 'download' : 'order',
+    ),
+  )
+  handle(ClientIpc.startJob, (jobId: unknown, options: unknown) => {
+    const opts = (options ?? {}) as {
+      selection?: unknown
+      goal?: unknown
+      cleanup?: unknown
+    }
+    return client.startJob(String(jobId), {
+      selection: Array.isArray(opts.selection)
+        ? opts.selection.map((i) => Number(i))
+        : [],
+      goal: opts.goal === 'download' ? 'download' : 'order',
+      cleanup:
+        typeof opts.cleanup === 'object' && opts.cleanup !== null
+          ? (opts.cleanup as {
+              deleteTorrent?: boolean
+              deleteFiles?: boolean
+              deleteZip?: boolean
+            })
+          : undefined,
+    })
+  })
+  handle(ClientIpc.listJobs, () => client.listJobs())
+  handle(ClientIpc.preflightOrder, (jobIds: unknown) =>
+    client.preflightOrder(Array.isArray(jobIds) ? jobIds.map((id) => String(id)) : []),
+  )
+  handle(ClientIpc.createOrder, (jobIds: unknown, cleanup: unknown) =>
+    client.createOrder(
+      Array.isArray(jobIds) ? jobIds.map((id) => String(id)) : [],
       typeof cleanup === 'object' && cleanup !== null
         ? (cleanup as { deleteTorrent?: boolean; deleteFiles?: boolean; deleteZip?: boolean })
         : undefined,
     ),
   )
-  handle(ClientIpc.startJob, (jobId: unknown) => client.startJob(String(jobId)))
+  handle(ClientIpc.dismissJob, (jobId: unknown) => client.dismissJob(String(jobId)))
+  handle(ClientIpc.discardJob, (jobId: unknown) => client.discardJob(String(jobId)))
   handle(ClientIpc.getJob, (jobId: unknown) => client.getJob(String(jobId)))
   handle(ClientIpc.retryPackaging, (jobId: unknown) => client.retryPackaging(String(jobId)))
   handle(ClientIpc.retryUpload, (jobId: unknown) => client.retryUpload(String(jobId)))
@@ -166,8 +205,12 @@ export function registerClientBridgeIpc(client: ClientRelayService): void {
   )
   handle(ClientIpc.listHistory, () => client.listHistory())
   handle(ClientIpc.clientsList, () => client.listAvailableClients())
-  handle(ClientIpc.sendToFriend, (source: unknown, targetClientId: unknown) =>
-    client.sendToFriend(String(source ?? ''), String(targetClientId ?? '')),
+  handle(ClientIpc.sendToFriend, (source: unknown, targetClientId: unknown, selection: unknown) =>
+    client.sendToFriend(
+      String(source ?? ''),
+      String(targetClientId ?? ''),
+      Array.isArray(selection) ? selection.map((i) => Number(i)) : [],
+    ),
   )
   handle(ClientIpc.friendsGet, () => client.getFriends())
   handle(ClientIpc.friendsAdd, (friend: unknown) => {

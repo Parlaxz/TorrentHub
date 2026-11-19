@@ -1,28 +1,24 @@
-import { ProgressBar, ProgressBlock } from "../components/ProgressBar";
-import { StagePipeline } from "../components/StagePipeline";
-import { StorageTable, StorageWarning, type StorageRow } from "../components/StorageTable";
-import { Badge, Button, Panel, SectionTitle } from "../components/ui";
+import { ProgressBar, ProgressBlock } from "./ProgressBar";
+import { StagePipeline } from "./StagePipeline";
+import { StorageTable, StorageWarning, type StorageRow } from "./StorageTable";
+import { Button, Panel, SectionTitle } from "./ui";
 import { formatBytes, formatCount, formatEta, formatPercent, formatSpeed } from "../lib/format";
 import { speedAdvisory } from "../lib/stages";
-import type { JobSnapshot } from "../types";
-import type { PollStatus } from "../lib/usePolling";
+import { isTerminalJobState, type JobSnapshot } from "../types";
 
-/**
- * Screen 5 — active job. Separate DOWNLOAD / PACKAGE / UPLOAD stages, never a
- * single fake percentage. Zero seeds / slow speeds are warnings, not failures.
- */
-export function ActiveJobScreen({
+/** SHARED job internals: stages, live telemetry, storage, retries, cancel. */
+export function JobDetail({
   job,
-  pollStatus,
   onCancel,
   onRetryPackaging,
   onRetryUpload,
+  showCancel = true,
 }: {
   job: JobSnapshot;
-  pollStatus: PollStatus;
   onCancel?: () => void;
   onRetryPackaging?: () => void;
   onRetryUpload?: () => void;
+  showCancel?: boolean;
 }) {
   const t = job.telemetry ?? null;
   const st = job.storage ?? null;
@@ -131,20 +127,7 @@ export function ActiveJobScreen({
     ) : undefined;
 
   return (
-    <div className="mx-auto w-full max-w-xl px-6 py-6">
-      <div className="mb-3 flex items-start justify-between gap-3">
-        <h1 className="min-w-0 truncate text-base font-bold text-zinc-900 dark:text-zinc-100" title={job.metadata?.name}>
-          {job.metadata?.name ?? "Torrent"}
-        </h1>
-        {pollStatus === "reconnecting" ? <Badge tone="amber">Reconnecting…</Badge> : null}
-      </div>
-
-      {pollStatus === "reconnecting" ? (
-        <p role="status" className="mb-3 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-200">
-          Lost contact with the server — reconnecting. Your download continues on the server.
-        </p>
-      ) : null}
-
+    <div>
       {st?.warning === "low" ? (
         <div className="mb-3">
           <StorageWarning level="low">
@@ -170,7 +153,12 @@ export function ActiveJobScreen({
               key: "package",
               title: "PACKAGE",
               state: job.stages.packaging,
-              note: job.stages.packaging === "skipped" ? "Single file is uploaded directly" : undefined,
+              note:
+                job.stages.packaging === "skipped"
+                  ? job.goal === "download"
+                    ? "Downloads-list job — no package or upload"
+                    : "Single file is uploaded directly"
+                  : undefined,
               detail: packageDetail,
             },
             { key: "upload", title: "UPLOAD TO VIKING", state: job.stages.upload, detail: uploadDetail },
@@ -209,7 +197,7 @@ export function ActiveJobScreen({
         </Panel>
       ) : null}
 
-      {!["complete", "failed", "cancelled", "interrupted"].includes(job.state) && onCancel ? (
+      {showCancel && onCancel && !isTerminalJobState(job.state) ? (
         <div className="mt-4 flex justify-end">
           <Button variant="ghost" onClick={onCancel}>
             Cancel job

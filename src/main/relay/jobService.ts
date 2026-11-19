@@ -1,4 +1,11 @@
-import type { CleanupPolicy, IntakeDraftView, IntakeSource, JobRecord } from "../jobs/types.js";
+import type {
+  CleanupPolicy,
+  IntakeDraftView,
+  IntakeSource,
+  JobGoal,
+  JobRecord,
+  PreflightView,
+} from "../jobs/types.js";
 import { ServiceError } from "./http/errors.js";
 
 export interface CreateIntakeInput {
@@ -15,10 +22,25 @@ export interface CreateJobInput {
   intakeId: string;
   selection?: number[] | null;
   zipRequired?: boolean | null;
+  /** Defaults to "order". "download" stops after the download stage. */
+  goal?: JobGoal;
   idempotencyKey?: string | null;
   /** Per-job cleanup overrides; unset keys fall back to server defaults. */
   cleanup?: Partial<CleanupPolicy> | null;
   /** Paired client committing the selection; used to enforce intake ownership. */
+  clientId?: string | null;
+}
+
+export interface PreflightSelectionInput {
+  intakeId: string;
+  selection: number[];
+  goal?: JobGoal;
+  clientId?: string | null;
+}
+
+export interface CreateOrderInput {
+  jobIds: string[];
+  cleanup?: Partial<CleanupPolicy> | null;
   clientId?: string | null;
 }
 
@@ -36,9 +58,14 @@ export interface JobService {
   createIntake(input: CreateIntakeInput): Promise<IntakeDraftView>;
   getIntake(intakeId: string, clientId?: string | null): Promise<IntakeDraftView | null>;
   createJob(input: CreateJobInput): Promise<JobRecord>;
+  preflightSelection(input: PreflightSelectionInput): Promise<PreflightView>;
+  createOrder(input: CreateOrderInput): Promise<JobRecord>;
+  preflightOrder(input: CreateOrderInput): Promise<PreflightView>;
   listJobs(clientId?: string | null): Promise<JobRecord[]>;
   getJob(jobId: string, clientId?: string | null): Promise<JobRecord | null>;
   cancelJob(jobId: string, clientId?: string | null): Promise<JobRecord>;
+  dismissJob(jobId: string, clientId?: string | null): Promise<JobRecord>;
+  discardDownload(jobId: string, clientId?: string | null): Promise<JobRecord>;
   retryPackaging(jobId: string, clientId?: string | null): Promise<JobRecord>;
   retryUpload(jobId: string, clientId?: string | null): Promise<JobRecord>;
   recheckStorage(jobId: string, clientId?: string | null): Promise<JobRecord>;

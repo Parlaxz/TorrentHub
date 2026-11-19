@@ -12,11 +12,14 @@ No decorative testids. Every mapping below is product-semantic.
 | `startup-section`, `start-with-windows`, `minimize-to-tray` | behavior toggles |
 | `direct-downloads-section`, `dd-auto-accept`, `dd-qbit-url`, `dd-qbit-key`, `dd-download-dir`, `dd-save`, `dd-refresh`, `dd-empty`, `dd-queue`, `dd-item-<id>`, `dd-accept-<id>`, `dd-decline-<id>` | client receiver inbox |
 | `open-logs-folder` | logs folder button |
-| `add-friend`, `add-friend-confirm`, `friend-<clientId>` | client friends |
+| `add-friend`, `add-friend-confirm`, `friend-<clientId>` | client friends (Send to Friend modal) |
 | `friend-rename-<clientId>`, `friend-rename-panel`, `friend-rename-input-<clientId>`, `friend-rename-save-<clientId>` | friend nickname editing |
-| `friend-paste` | paste clipboard into the friend link input |
-| `friend-sent-list`, `friend-status-<directJobId>`, `friend-status-check-<directJobId>` | on-demand sent-link status |
-| `open-page-link`, `open-direct-link` | CompleteScreen external opens |
+| `torrent-paste` | paste clipboard into the Home link input |
+| `send-to-friend-open`, `send-to-friend`, `no-friends` | selection page → Send to Friend modal |
+| `add-to-order`, `confirm-commit`, `add-to-downloads` | selection page actions and their confirm modal |
+| `delete-downloads`, `order-selected` | downloads-list bulk actions |
+| `download-<jobId>`, `friend-download-<directJobId>`, `order-<jobId>` | Home list rows |
+| `dismiss-order-<jobId>`, `confirm-order`, `order-cleanup-*` | orders list + combined-order modal |
 | `pair-client`, `send-to-friend`, `open-settings`, `exit-button`, `exit-cancel`, `exit-confirm` | server dashboard |
 | `pairing-regenerate` | pairing modal |
 | `send-direct` | SendDirectModal send |
@@ -24,7 +27,7 @@ No decorative testids. Every mapping below is product-semantic.
 | `active-transfer` | ActiveTransferCard |
 | `online-line` | Dashboard header online/offline line (contains address — never exact-match "Online") |
 | `offline-banner` / `interrupted-banner` | dashboard banners |
-| `cleanup-deleteTorrent` / `cleanup-deleteFiles` / `cleanup-deleteZip` | SelectionScreen cleanup checkboxes (camelCase keys; NOTE: rendered only after preflight verdict) |
+| `cleanup-deleteTorrent` / `cleanup-deleteFiles` / `cleanup-deleteZip` | order confirm modal cleanup checkboxes (camelCase keys) |
 | `cleanup-delete-torrent` / `cleanup-delete-files` / `cleanup-delete-zip` | SettingsPanel auto-delete switches (kebab-case; on the `role=switch` buttons) |
 | `server-address` | Radmin step address readout |
 | `qbit-probe-ok` / `qbit-probe-error` | qBittorrent step probe result |

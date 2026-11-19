@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { InvalidTransitionError } from "../../src/main/jobs/index.ts";
 import type { JobRecord } from "../../src/main/jobs/index.ts";
 import { initialStageMap } from "../../src/main/jobs/index.ts";
 import { fakeMetadata } from "./fakes.ts";
@@ -152,7 +151,7 @@ test("stale nonterminal previous-session job becomes interrupted, not resumed", 
   assert.ok(draft, "current-session draft untouched");
 });
 
-test("V1 concurrency: second transfer rejected while one is active", async () => {
+test("transfers queue: a second commit waits while one is active", async () => {
   const h = makeHarness({
     metadata: fakeMetadata(1, 500),
     telemetryScript: [{ downloadedBytes: 10, selectedComplete: false, speedBps: 100 }],
@@ -163,15 +162,10 @@ test("V1 concurrency: second transfer rejected while one is active", async () =>
   await waitFor(async () => ((await h.engine.getJob(first.id)).state === "downloading" ? true : null));
 
   const second = await h.engine.createIntake(MAGNET);
-  await assert.rejects(
-    () => h.engine.commitSelection(second.id, [0]),
-    (error: unknown) => {
-      assert.ok(error instanceof InvalidTransitionError);
-      assert.match(error.message, /another transfer is active/);
-      return true;
-    },
-  );
+  const queued = await h.engine.commitSelection(second.id, [0]);
+  assert.equal(queued.state, "queued", "second transfer waits its turn");
 
   await h.engine.cancel(first.id);
+  await h.engine.cancel(second.id);
   await h.engine.whenIdle();
 });

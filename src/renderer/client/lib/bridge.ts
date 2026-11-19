@@ -19,7 +19,13 @@
  * by main (safeStorage); the renderer only passes values through.
  */
 
-import type { HistoryEntry, IntakeDraftView, JobSnapshot, StoragePreflight } from "../types";
+import type {
+  HistoryEntry,
+  IntakeDraftView,
+  JobGoal,
+  JobSnapshot,
+  StoragePreflight,
+} from "../types";
 
 export interface SavedConnection {
   host: string;
@@ -49,11 +55,15 @@ export interface Friend {
   alias?: string;
 }
 
-/** Sender-side view of a link previously sent to a friend (no link echo). */
+/** Sender-side view of a link previously sent to a friend. */
 export interface SentDirectJobStatus {
   id: string;
   targetClientId: string;
   targetName: string;
+  /** Short source label for the downloads list after a restart. */
+  sourcePreview?: string | null;
+  /** File indexes the sender picked; null = whole torrent. */
+  selection?: number[] | null;
   state: string;
   /** Last receiver-reported progress; null until the first report lands. */
   progress: {
@@ -82,16 +92,40 @@ export interface VikingBridge {
   cancelJob(jobId: string): Promise<void>;
 
   /**
-   * Confirm selection using canonical qBittorrent FILE INDEXES.
-   * Server responds with authoritative storage preflight.
+   * Ad-hoc storage check. Does not start the job.
+   * The goal decides whether a temporary ZIP is included in the peak.
    */
-  confirmSelection(
+  preflightSelection(
     jobId: string,
     fileIndexes: number[],
-    cleanup?: { deleteTorrent?: boolean; deleteFiles?: boolean; deleteZip?: boolean },
+    goal?: JobGoal,
   ): Promise<BridgeResult<StoragePreflight>>;
 
-  startJob(jobId: string): Promise<void>;
+  /** Commit the selection and start the transfer. */
+  startJob(
+    jobId: string,
+    options: {
+      selection: number[];
+      goal: JobGoal;
+      cleanup?: { deleteTorrent?: boolean; deleteFiles?: boolean; deleteZip?: boolean };
+    },
+  ): Promise<void>;
+
+  /** All jobs for this client (drafts, downloads, orders). */
+  listJobs(): Promise<JobSnapshot[]>;
+
+  /** Storage check for a bundle order made from parked downloads. */
+  preflightOrder(jobIds: string[]): Promise<StoragePreflight>;
+  /** Create the bundle order and start it. */
+  createOrder(
+    jobIds: string[],
+    cleanup?: { deleteTorrent?: boolean; deleteFiles?: boolean; deleteZip?: boolean },
+  ): Promise<{ id: string }>;
+  /** Stop an active order and remove it from the list. */
+  dismissJob(jobId: string): Promise<void>;
+  /** Delete a parked download and its files. */
+  discardJob(jobId: string): Promise<void>;
+
   getJob(jobId: string): Promise<JobSnapshot>;
   retryPackaging(jobId: string): Promise<void>;
   retryUpload(jobId: string): Promise<void>;
@@ -106,10 +140,11 @@ export interface VikingBridge {
 
   /** Other paired clients on the server (potential friends). */
   clientsList(): Promise<Array<{ clientId: string; name: string }>>;
-  /** Client-to-client: send a link to another paired client's queue. */
+  /** Client-to-client: send a link (and chosen file indexes) to a friend. */
   sendToFriend(
     source: string,
     targetClientId: string,
+    selection?: number[],
   ): Promise<BridgeResult<{ id: string }>>;
   friendsGet(): Promise<Friend[]>;
   friendsAdd(friend: { clientId: string; name: string }): Promise<Friend[]>;

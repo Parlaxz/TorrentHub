@@ -25,9 +25,17 @@ export interface CreateRelayManagerOptions extends Omit<RelayManagerOptions, "bu
       targetClientId: string,
       targetName: string,
       from?: { clientId: string; name: string },
+      selection?: number[] | null,
     ): Promise<{ id: string }>;
     queuedFor(clientId: string): Promise<
-        Array<{ id: string; source: string; sourceKind: string; state: string; fromName?: string }>
+        Array<{
+          id: string;
+          source: string;
+          sourceKind: string;
+          selection?: number[] | null;
+          state: string;
+          fromName?: string;
+        }>
       >;
     setState(id: string, state: "accepted" | "declined"): Promise<unknown>;
   } | null;

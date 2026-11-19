@@ -10,6 +10,9 @@ import {
   idParamSchema,
   intakeCreateSchema,
   jobCreateSchema,
+  jobPreflightSchema,
+  orderCreateSchema,
+  orderPreflightSchema,
   pairRequestSchema,
 } from "./schemas.js";
 
@@ -95,6 +98,19 @@ export function registerRoutes(app: FastifyInstance, deps: RelayAppDeps): void {
       return view;
     });
 
+    api.post("/jobs/preflight", async (req, reply) => {
+      const parsed = jobPreflightSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return reply.code(400).send({ error: "validation_error", issues: formatIssues(parsed.error) });
+      }
+      return jobs.preflightSelection({
+        intakeId: parsed.data.intakeId,
+        selection: parsed.data.selection,
+        goal: parsed.data.goal,
+        clientId: req.client!.clientId,
+      });
+    });
+
     api.post("/jobs", async (req, reply) => {
       const parsed = jobCreateSchema.safeParse(req.body);
       if (!parsed.success) {
@@ -104,7 +120,32 @@ export function registerRoutes(app: FastifyInstance, deps: RelayAppDeps): void {
         intakeId: parsed.data.intakeId,
         selection: parsed.data.selection ?? null,
         zipRequired: parsed.data.zipRequired ?? null,
+        goal: parsed.data.goal,
         idempotencyKey: resolveIdempotencyKey(req, parsed.data.idempotencyKey ?? null),
+        cleanup: parsed.data.cleanup ?? null,
+        clientId: req.client!.clientId,
+      });
+      return reply.code(201).send(record);
+    });
+
+    api.post("/orders/preflight", async (req, reply) => {
+      const parsed = orderPreflightSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return reply.code(400).send({ error: "validation_error", issues: formatIssues(parsed.error) });
+      }
+      return jobs.preflightOrder({
+        jobIds: parsed.data.jobIds,
+        clientId: req.client!.clientId,
+      });
+    });
+
+    api.post("/orders", async (req, reply) => {
+      const parsed = orderCreateSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return reply.code(400).send({ error: "validation_error", issues: formatIssues(parsed.error) });
+      }
+      const record = await jobs.createOrder({
+        jobIds: parsed.data.jobIds,
         cleanup: parsed.data.cleanup ?? null,
         clientId: req.client!.clientId,
       });
@@ -121,6 +162,8 @@ export function registerRoutes(app: FastifyInstance, deps: RelayAppDeps): void {
     });
 
     api.post("/jobs/:id/cancel", async (req) => jobs.cancelJob(requireId(req), req.client!.clientId));
+    api.post("/jobs/:id/dismiss", async (req) => jobs.dismissJob(requireId(req), req.client!.clientId));
+    api.post("/jobs/:id/discard", async (req) => jobs.discardDownload(requireId(req), req.client!.clientId));
     api.post("/jobs/:id/retry-packaging", async (req) => jobs.retryPackaging(requireId(req), req.client!.clientId));
     api.post("/jobs/:id/retry-upload", async (req) => jobs.retryUpload(requireId(req), req.client!.clientId));
     api.post("/jobs/:id/recheck-storage", async (req) => jobs.recheckStorage(requireId(req), req.client!.clientId));
@@ -162,6 +205,7 @@ export function registerRoutes(app: FastifyInstance, deps: RelayAppDeps): void {
         .strictObject({
           source: z.string().min(8).max(4096),
           targetClientId: z.string().min(1).max(64),
+          selection: z.array(z.number().int().min(0).max(1_000_000)).max(10_000).nullish(),
         })
         .safeParse(req.body);
       if (!parsed.success) {
@@ -177,11 +221,17 @@ export function registerRoutes(app: FastifyInstance, deps: RelayAppDeps): void {
       if (!target) {
         return reply.code(404).send({ error: "not_found", message: "target client is not paired" });
       }
-      const kind = parsed.data.source.startsWith("magnet:")
-        ? "magnet"
-        : /^https?:\/\//i.test(parsed.data.source)
-          ? "url"
-          : null;
+      let kind: "magnet" | "url" | "direct" | null;
+      if (parsed.data.source.startsWith("magnet:")) kind = "magnet";
+      else if (/^https?:\/\//i.test(parsed.data.source)) {
+        let path = parsed.data.source;
+        try {
+          path = new URL(parsed.data.source).pathname;
+        } catch {
+          /* keep the raw value */
+        }
+        kind = /\.torrent$/i.test(path) ? "url" : "direct";
+      } else kind = null;
       if (!kind) {
         return reply.code(400).send({ error: "validation_error", message: "source must be a magnet or http(s) link" });
       }
@@ -191,6 +241,7 @@ export function registerRoutes(app: FastifyInstance, deps: RelayAppDeps): void {
         target.clientId,
         target.name,
         { clientId: from.clientId, name: from.name },
+        parsed.data.selection ?? null,
       );
       return reply.code(201).send({ id: job.id });
     });
@@ -207,12 +258,15 @@ export function registerRoutes(app: FastifyInstance, deps: RelayAppDeps): void {
     api.get("/direct-jobs/sent", async (req) => {
       if (!deps.directJobs?.sentBy) return { jobs: [] };
       const jobs = await deps.directJobs.sentBy(req.client!.clientId);
-      // The sender already knows the link it sent; don't echo it back.
+      // The sender already knows the link it sent; echo only a short preview
+      // so the downloads list can still label the row after a restart.
       return {
         jobs: jobs.map((j) => ({
           id: j.id,
           targetClientId: j.targetClientId,
           targetName: j.targetName,
+          sourcePreview: j.source.length > 80 ? `${j.source.slice(0, 80)}…` : j.source,
+          selection: j.selection ?? null,
           state: j.state,
           progress: j.progress ?? null,
           createdAt: j.createdAt,

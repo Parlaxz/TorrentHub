@@ -1,11 +1,10 @@
-# E2E Final Sweep — Viking Relay v0.4.3
+# E2E Final Sweep — Viking Relay v0.5.0-beta.1
 
 ## Verdict
 
-**199/199 PASSED, 0 failed, 0 skipped** — full sequential campaign, single worker, 12.6 minutes.
-(Run after the DEF-007 tenant-scoping fix; PERM-002 is now a REAL isolation pass, no
-expected-failures anywhere. An earlier sweep of the same suite scored 200/200 including one
-diagnostic probe since removed.)
+**201/201 PASSED, 0 failed, 0 skipped** — full sequential campaign, single worker, 12.4 minutes.
+Run against the released v0.5.0-beta.1 build (beta update channel + tenant-scoped history +
+headless rollback feature all integrated).
 
 ## Exact command
 
@@ -28,8 +27,8 @@ node node_modules\@playwright\test\cli.js test tests/e2e/
 |---|---|---|
 | sanity.spec.ts | 4 | 0 |
 | cluster-smoke.spec.ts | 1 | 0 |
-| lifecycle.spec.ts | 11 | 0 |
-| shell-settings.spec.ts | 26 | 0 |
+| lifecycle.spec.ts | 12 | 0 |
+| shell-settings.spec.ts | 27 | 0 |
 | setup-wizard.spec.ts | 20 | 0 |
 | auth-pairing.spec.ts | 15 (PERM-002 = real tenant-isolation pass incl. foreign-mutation 404 ×4) | 0 |
 | core-journey.spec.ts | 22 | 0 |
@@ -42,7 +41,7 @@ node node_modules\@playwright\test\cli.js test tests/e2e/
 | multi-instance.spec.ts | 9 | 0 |
 | ui-sweep.spec.ts | 12 | 0 |
 | a11y.spec.ts | 6 | 0 |
-| **Total** | **200** | **0** |
+| **Total** | **201** | **0** |
 
 ## What the campaign exercised for real
 

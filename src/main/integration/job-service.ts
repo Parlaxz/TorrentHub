@@ -18,8 +18,16 @@ import {
   type JobEngine,
 } from '../jobs';
 import { isTerminalJobState } from '../jobs';
-import type { IntakeDraftView, JobRecord } from '../jobs/types';
-import { jobConflict, jobNotFound, type CreateIntakeInput, type CreateJobInput, type JobService } from '../relay/jobService';
+import type { IntakeDraftView, JobRecord, PreflightView } from '../jobs/types';
+import {
+  jobConflict,
+  jobNotFound,
+  type CreateIntakeInput,
+  type CreateJobInput,
+  type CreateOrderInput,
+  type JobService,
+  type PreflightSelectionInput,
+} from '../relay/jobService';
 
 /** Public job snapshot — the only job shape that ever leaves the process. */
 export type PublicJobSnapshot = Omit<
@@ -30,6 +38,7 @@ export type PublicJobSnapshot = Omit<
   | 'zipPath'
   | 'directSourcePath'
   | 'completedFiles'
+  | 'bundleEntries'
   | 'torrentId'
   | 'sessionEpoch'
   | 'idempotencyKey'
@@ -100,6 +109,7 @@ export class EngineJobService implements JobService {
         selection,
         input.idempotencyKey ?? null,
         input.cleanup ?? null,
+        input.goal ?? 'order',
       );
       return toPublicJob(record);
     } catch (error) {
@@ -111,6 +121,45 @@ export class EngineJobService implements JobService {
         return toPublicJob(record);
       }
       throw error;
+    }
+  }
+
+  async preflightSelection(input: PreflightSelectionInput): Promise<PreflightView> {
+    await this.#assertIntakeVisible(input.intakeId, input.clientId);
+    try {
+      return await this.engine.preflightSelection(
+        input.intakeId,
+        input.selection,
+        input.goal ?? 'order',
+      );
+    } catch (error) {
+      throw translate(error, input.intakeId);
+    }
+  }
+
+  async createOrder(input: CreateOrderInput): Promise<PublicJobSnapshot> {
+    await this.#assertJobsVisible(input.jobIds, input.clientId);
+    try {
+      const record = await this.engine.createOrder(
+        input.jobIds,
+        input.clientId ?? null,
+        input.cleanup ?? null,
+      );
+      return toPublicJob(record);
+    } catch (error) {
+      if (error instanceof InsufficientSpaceError) {
+        throw jobConflict('order', error.message);
+      }
+      throw translate(error, 'order');
+    }
+  }
+
+  async preflightOrder(input: CreateOrderInput): Promise<PreflightView> {
+    await this.#assertJobsVisible(input.jobIds, input.clientId);
+    try {
+      return await this.engine.preflightOrder(input.jobIds);
+    } catch (error) {
+      throw translate(error, 'order');
     }
   }
 
@@ -148,10 +197,60 @@ export class EngineJobService implements JobService {
     if (!isVisible(record, clientId)) throw jobNotFound(jobId);
   }
 
+  async #assertIntakeVisible(
+    intakeId: string,
+    clientId?: string | null,
+  ): Promise<void> {
+    if (clientId == null) return;
+    let intake: JobRecord;
+    try {
+      intake = await this.engine.getJob(intakeId);
+    } catch (error) {
+      if (error instanceof JobNotFoundError) throw jobNotFound(intakeId);
+      throw error;
+    }
+    if (!isVisible(intake, clientId)) throw jobNotFound(intakeId);
+  }
+
+  async #assertJobsVisible(
+    jobIds: string[],
+    clientId?: string | null,
+  ): Promise<void> {
+    if (clientId == null) return;
+    for (const id of jobIds) {
+      let record: JobRecord;
+      try {
+        record = await this.engine.getJob(id);
+      } catch (error) {
+        if (error instanceof JobNotFoundError) throw jobNotFound(id);
+        throw error;
+      }
+      if (!isVisible(record, clientId)) throw jobNotFound(id);
+    }
+  }
+
   async cancelJob(jobId: string, clientId?: string | null): Promise<PublicJobSnapshot> {
     await this.assertMutableBy(jobId, clientId);
     try {
       return toPublicJob(await this.engine.cancel(jobId));
+    } catch (error) {
+      throw translate(error, jobId);
+    }
+  }
+
+  async dismissJob(jobId: string, clientId?: string | null): Promise<PublicJobSnapshot> {
+    await this.assertMutableBy(jobId, clientId);
+    try {
+      return toPublicJob(await this.engine.dismiss(jobId));
+    } catch (error) {
+      throw translate(error, jobId);
+    }
+  }
+
+  async discardDownload(jobId: string, clientId?: string | null): Promise<PublicJobSnapshot> {
+    await this.assertMutableBy(jobId, clientId);
+    try {
+      return toPublicJob(await this.engine.discardDownload(jobId));
     } catch (error) {
       throw translate(error, jobId);
     }
@@ -192,6 +291,8 @@ export class EngineJobService implements JobService {
     return jobs
       .filter((j) => isVisible(j, clientId))
       .filter((j) => isTerminalJobState(j.state))
+      .filter((j) => j.goal !== 'download')
+      .filter((j) => !j.archived)
       .slice(0, limit ?? 50)
       .map(toPublicJob);
   }
@@ -204,6 +305,7 @@ function toDraftView(record: JobRecord): IntakeDraftView {
   return {
     id: record.id,
     state: record.state as IntakeDraftView['state'],
+    source: record.source,
     metadata: record.metadata ?? null,
     error: record.error ?? null,
   };
@@ -217,6 +319,7 @@ function toPublicJob(record: JobRecord): PublicJobSnapshot {
     updatedAt: record.updatedAt,
     state: record.state,
     source: record.source,
+    goal: record.goal ?? 'order',
     clientId: record.clientId ?? null,
     selection: record.selection ?? null,
     selectedBytes: record.selectedBytes ?? null,
@@ -232,6 +335,9 @@ function toPublicJob(record: JobRecord): PublicJobSnapshot {
     result: record.result ?? null,
     error: record.error ?? null,
     lastKnownStage: record.lastKnownStage ?? null,
+    bundleJobIds: record.bundleJobIds ?? null,
+    orderedByJobId: record.orderedByJobId ?? null,
+    archived: record.archived ?? false,
     storagePreflight: record.preflight ?? null,
   };
   return pub;

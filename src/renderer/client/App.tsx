@@ -1,6 +1,4 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
-import { ActiveJobScreen } from "./screens/ActiveJobScreen";
-import { CompleteScreen } from "./screens/CompleteScreen";
 import { ConnectScreen } from "./screens/ConnectScreen";
 import { ErrorScreen } from "./screens/ErrorScreen";
 import { HistoryScreen } from "./screens/HistoryScreen";
@@ -11,7 +9,7 @@ import { Button, EmptyState, Panel, StatusDot } from "./components/ui";
 import { getBridge, type ConnectionStatus, type SavedConnection } from "./lib/bridge";
 import { classifyJobFailure, type ClientErrorKind } from "./lib/errors";
 import { usePolling } from "./lib/usePolling";
-import { isTerminalJobState, type HistoryEntry, type IntakeDraftView, type JobSnapshot } from "./types";
+import type { HistoryEntry, IntakeDraftView } from "./types";
 
 type Phase =
   | { s: "boot" }
@@ -20,8 +18,6 @@ type Phase =
   | { s: "home" }
   | { s: "intake"; jobId: string; sourceKind: "magnet" | "url" | null }
   | { s: "selection"; draft: IntakeDraftView }
-  | { s: "active"; jobId: string }
-  | { s: "complete"; job: JobSnapshot }
   | { s: "error"; kind: ClientErrorKind; message?: string | null; jobId?: string }
   | { s: "history" };
 
@@ -33,7 +29,6 @@ export function App() {
   const [history, setHistory] = useState<HistoryEntry[] | null>(null);
   const [submitBusy, setSubmitBusy] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
-  const [latestJob, setLatestJob] = useState<JobSnapshot | null>(null);
 
   // Boot: load saved connection (main owns secrets).
   useEffect(() => {
@@ -96,25 +91,6 @@ export function App() {
     },
   });
 
-  // Active-job polling (~1/s). A failed poll never cancels server work.
-  const jobPollStatus = usePolling<JobSnapshot>({
-    enabled: phase.s === "active",
-    intervalMs: 1000,
-    fn: () => bridge!.getJob((phase as { jobId: string }).jobId),
-    onData: (job) => {
-      setLatestJob(job);
-      if (!isTerminalJobState(job.state)) return;
-      if (job.state === "complete") setPhase({ s: "complete", job });
-      else
-        setPhase({
-          s: "error",
-          kind: classifyJobFailure(job),
-          message: job.error?.message ?? null,
-          jobId: job.id,
-        });
-    },
-  });
-
   const submitIntake = useCallback(
     async (input: string): Promise<void> => {
       if (!bridge) return;
@@ -133,13 +109,12 @@ export function App() {
     [bridge],
   );
 
-  const cancelJob = useCallback(
+  const cancelDraft = useCallback(
     async (jobId: string): Promise<void> => {
       if (!bridge) return;
       try {
         await bridge.cancelJob(jobId);
       } finally {
-        setLatestJob(null);
         setPhase({ s: "home" });
       }
     },
@@ -216,45 +191,15 @@ export function App() {
       ) : null}
 
       {phase.s === "intake" ? (
-        <MetadataScreen sourceKind={phase.sourceKind} onCancel={() => void cancelJob(phase.jobId)} />
+        <MetadataScreen sourceKind={phase.sourceKind} onCancel={() => void cancelDraft(phase.jobId)} />
       ) : null}
 
       {phase.s === "selection" ? (
         <SelectionScreen
           bridge={bridge}
           draft={phase.draft}
-          onBack={() => {
-            void cancelJob(phase.draft.id);
-          }}
-          onStarted={() => setPhase({ s: "active", jobId: phase.draft.id })}
-        />
-      ) : null}
-
-      {phase.s === "active" ? (
-        latestJob && latestJob.id === phase.jobId ? (
-          <ActiveJobScreen
-            job={latestJob}
-            pollStatus={jobPollStatus}
-            onCancel={() => void cancelJob(phase.jobId)}
-            onRetryPackaging={() => void bridge.retryPackaging(phase.jobId)}
-            onRetryUpload={() => void bridge.retryUpload(phase.jobId)}
-          />
-        ) : (
-          <EmptyState title="Connecting to job…" />
-        )
-      ) : null}
-
-      {phase.s === "complete" ? (
-        <CompleteScreen
-          bridge={bridge}
-          filename={phase.job.metadata?.name ?? "Download"}
-          sizeBytes={phase.job.result?.sizeBytes ?? phase.job.metadata?.totalSizeBytes ?? null}
-          url={phase.job.result?.url ?? ""}
-          directUrl={phase.job.result?.directUrl ?? null}
-          onNewTorrent={() => {
-            setLatestJob(null);
-            setPhase({ s: "home" });
-          }}
+          onDone={() => setPhase({ s: "home" })}
+          onBack={() => void cancelDraft(phase.draft.id)}
         />
       ) : null}
 
@@ -262,24 +207,7 @@ export function App() {
         <ErrorScreen
           kind={phase.kind}
           message={phase.message}
-          onRetryPackaging={
-            phase.jobId
-              ? () => {
-                  setPhase({ s: "active", jobId: phase.jobId! });
-                  void bridge.retryPackaging(phase.jobId!);
-                }
-              : undefined
-          }
-          onRetryUpload={
-            phase.jobId
-              ? () => {
-                  setPhase({ s: "active", jobId: phase.jobId! });
-                  void bridge.retryUpload(phase.jobId!);
-                }
-              : undefined
-          }
           onBack={() => {
-            setLatestJob(null);
             setPhase({ s: "home" });
           }}
         />

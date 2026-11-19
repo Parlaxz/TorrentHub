@@ -15,6 +15,7 @@ import { registerServerBridgeIpc } from './server/ipc-server'
 import { ServerController } from './server/controller'
 import { SECRET_QBIT_API_KEY } from './server/composition'
 import { DirectJobStore } from './server/direct-job-store'
+import { applyLoginItem } from './login-item'
 
 // ---------------------------------------------------------------------------
 // Window + security
@@ -255,6 +256,12 @@ app.whenReady().then(() => {
 
     settings = new AppSettingsStore(paths.settingsFile, log)
     const secrets = new SecretStore(paths.secretsFile, log)
+
+    // The toggle is the only other writer, so re-apply the persisted value on
+    // every start. Without this, a missing or stale OS entry (cleaned up by
+    // Windows, lost on reinstall, or set by a build that never registered it)
+    // stays broken while the UI still shows "on".
+    applyLoginItem(settings.get().startWithWindows)
 
     // Mirror warn/error logs into every window's DevTools console.
     attachWindowLogMirror(() => BrowserWindow.getAllWindows())
