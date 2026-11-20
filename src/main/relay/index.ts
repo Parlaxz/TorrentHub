@@ -38,6 +38,7 @@ export interface CreateRelayManagerOptions extends Omit<RelayManagerOptions, "bu
         }>
       >;
     setState(id: string, state: "accepted" | "declined"): Promise<unknown>;
+    dismissBySender?(id: string, clientId: string): Promise<unknown>;
   } | null;
 }
 

@@ -6,9 +6,9 @@ import { Button, ErrorText, Modal, Panel, SectionTitle, Spinner } from "../compo
 import type { VikingBridge } from "../lib/bridge";
 import { formatBytes, formatCount } from "../lib/format";
 import { startBlocked, zipNotice } from "../lib/preflight";
-import type { IntakeDraftView, JobGoal, StoragePreflight } from "../types";
+import type { IntakeDraftView, StoragePreflight } from "../types";
 
-type Action = "order" | "download" | "friend";
+type Action = "order" | "friend";
 
 /**
  * Screen 4 — file selection + three exits:
@@ -30,6 +30,8 @@ export function SelectionScreen({
     () => new Set(meta.files.map((f) => f.index)),
   );
   const [action, setAction] = useState<Action | null>(null);
+  const [downloadBusy, setDownloadBusy] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
 
   const stats = useMemo(() => {
     let bytes = 0;
@@ -48,6 +50,19 @@ export function SelectionScreen({
     // The intake draft is no longer needed; the friend job is separate.
     await bridge.cancelJob(draft.id).catch(() => {});
     onDone();
+  };
+
+  const addToDownloads = async (): Promise<void> => {
+    setDownloadBusy(true);
+    setActionError(null);
+    try {
+      await bridge.startJob(draft.id, { selection: selectedIndexes, goal: "download" });
+      onDone();
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : "Could not start the download.");
+    } finally {
+      setDownloadBusy(false);
+    }
   };
 
   return (
@@ -108,10 +123,11 @@ export function SelectionScreen({
           </Button>
           <Button
             variant="secondary"
-            onClick={() => setAction("download")}
-            disabled={selected.size === 0}
+            onClick={() => void addToDownloads()}
+            disabled={selected.size === 0 || downloadBusy}
             data-testid="add-to-downloads"
           >
+            {downloadBusy ? <Spinner /> : null}
             Add to Downloads List
           </Button>
           <Button
@@ -124,9 +140,10 @@ export function SelectionScreen({
         </div>
       </div>
 
+      <ErrorText>{actionError}</ErrorText>
+
       <CommitModal
-        open={action === "order" || action === "download"}
-        goal={action === "download" ? "download" : "order"}
+        open={action === "order"}
         bridge={bridge}
         draft={draft}
         indexes={selectedIndexes}
@@ -150,7 +167,6 @@ export function SelectionScreen({
 
 function CommitModal({
   open,
-  goal,
   bridge,
   draft,
   indexes,
@@ -160,7 +176,6 @@ function CommitModal({
   onDone,
 }: {
   open: boolean;
-  goal: JobGoal;
   bridge: VikingBridge;
   draft: IntakeDraftView;
   indexes: number[];
@@ -182,7 +197,7 @@ function CommitModal({
     setError(null);
     setLoading(true);
     void bridge
-      .preflightSelection(draft.id, indexes, goal)
+      .preflightSelection(draft.id, indexes, "order")
       .then((res) => {
         if (!alive) return;
         if (res.ok) setPreflight(res.value);
@@ -194,13 +209,13 @@ function CommitModal({
     return () => {
       alive = false;
     };
-  }, [open, bridge, draft.id, indexes, goal]);
+  }, [open, bridge, draft.id, indexes]);
 
   const blocked = startBlocked(preflight);
-  const notice = goal === "order" ? zipNotice(fileCount, draft.metadata?.name ?? "torrent", {
+  const notice = zipNotice(fileCount, draft.metadata?.name ?? "torrent", {
     selectedBytes,
     tempZipBytes: preflight?.tempZipBytes,
-  }) : null;
+  });
 
   const confirm = async (): Promise<void> => {
     setBusy(true);
@@ -208,8 +223,8 @@ function CommitModal({
     try {
       await bridge.startJob(draft.id, {
         selection: indexes,
-        goal,
-        ...(goal === "order" ? { cleanup } : {}),
+        goal: "order",
+        cleanup,
       });
       onDone();
     } catch (err) {
@@ -220,7 +235,7 @@ function CommitModal({
   };
 
   return (
-    <Modal open={open} onClose={onClose} title={goal === "order" ? "Add to order" : "Add to downloads"} wide>
+    <Modal open={open} onClose={onClose} title="Add to order" wide>
       <div className="space-y-4">
         {notice ? (
           <div
@@ -241,9 +256,7 @@ function CommitModal({
             className="flex items-center gap-2 rounded-md border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm text-zinc-700 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300"
           >
             <span aria-hidden="true">↥</span>
-            {goal === "order"
-              ? "Upload selected file directly — no packaging needed."
-              : "Download selected files — no packaging, no upload."}
+            Upload selected file directly — no packaging needed.
           </div>
         )}
 
@@ -255,7 +268,7 @@ function CommitModal({
 
         {preflight ? <StorageCheck preflight={preflight} /> : null}
 
-        {goal === "order" && preflight ? (
+        {preflight ? (
           <Panel>
             <SectionTitle>After upload</SectionTitle>
             <div className="space-y-1.5 text-sm text-zinc-700 dark:text-zinc-300" data-testid="cleanup-overrides">
@@ -292,7 +305,7 @@ function CommitModal({
           </Button>
           <Button onClick={() => void confirm()} disabled={busy || loading || blocked || !preflight} data-testid="confirm-commit">
             {busy ? <Spinner /> : null}
-            {goal === "order" ? "Add to Order" : "Add to Downloads"}
+            Add to Order
           </Button>
         </div>
       </div>

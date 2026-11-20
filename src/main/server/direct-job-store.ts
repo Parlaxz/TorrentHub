@@ -31,6 +31,8 @@ export interface DirectJob {
   fromClientId: string;
   fromName: string;
   state: DirectJobState;
+  /** Sender hid this row from their own "Sent to friends" list. */
+  dismissedBySender?: boolean;
   /** Receiver-reported download progress; null until the first report lands. */
   progress?: DirectJobProgress | null;
   createdAt: string;
@@ -104,9 +106,20 @@ export class DirectJobStore {
   /** Jobs this client sent (newest first) — the sender's on-demand status view. */
   async sentBy(clientId: string): Promise<DirectJob[]> {
     return (await this.load())
-      .filter((j) => j.fromClientId === clientId)
+      .filter((j) => j.fromClientId === clientId && !j.dismissedBySender)
       .slice()
       .reverse(); // newest first
+  }
+
+  /** Hide a sent row for its sender. The receiver's queue is untouched. */
+  async dismissBySender(id: string, clientId: string): Promise<DirectJob | null> {
+    const jobs = await this.load();
+    const job = jobs.find((j) => j.id === id);
+    if (!job || job.fromClientId !== clientId) return null;
+    job.dismissedBySender = true;
+    job.updatedAt = new Date().toISOString();
+    await this.save(jobs);
+    return job;
   }
 
   async getById(id: string): Promise<DirectJob | null> {

@@ -176,11 +176,12 @@ export function registerRoutes(app: FastifyInstance, deps: RelayAppDeps): void {
       return { history: await jobs.listHistory(parsed.data.limit, req.client!.clientId) };
     });
 
-    api.get("/server/status", async () => ({
+    api.get("/server/status", async (req) => ({
       ok: true,
       server: { name: "viking-relay", version: deps.serverVersion ?? "0.1.0" },
       transport: deps.transportSnapshot?.() ?? null,
       pairedClients: auth.listClients().filter((c) => !c.revoked).length,
+      clientId: req.client!.clientId,
       time: new Date().toISOString(),
     }));
 
@@ -265,6 +266,7 @@ export function registerRoutes(app: FastifyInstance, deps: RelayAppDeps): void {
           id: j.id,
           targetClientId: j.targetClientId,
           targetName: j.targetName,
+          fromClientId: j.fromClientId,
           sourcePreview: j.source.length > 80 ? `${j.source.slice(0, 80)}…` : j.source,
           selection: j.selection ?? null,
           state: j.state,
@@ -273,6 +275,20 @@ export function registerRoutes(app: FastifyInstance, deps: RelayAppDeps): void {
           updatedAt: j.updatedAt,
         })),
       };
+    });
+
+    /**
+     * Sender hides a sent link from their own list. The receiver's queue and
+     * any in-flight download are untouched.
+     */
+    api.post("/direct-jobs/:id/dismiss", async (req) => {
+      const id = requireId(req);
+      if (!deps.directJobs?.dismissBySender) {
+        throw new ServiceError(404, "not_found", `no direct job ${id}`);
+      }
+      const job = await deps.directJobs.dismissBySender(id, req.client!.clientId);
+      if (!job) throw new ServiceError(404, "not_found", `no direct job ${id}`);
+      return { ok: true };
     });
 
     /**

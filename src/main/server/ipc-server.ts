@@ -227,6 +227,9 @@ export function registerClientBridgeIpc(client: ClientRelayService): void {
   handle(ClientIpc.directJobStatus, (id: unknown) =>
     client.getDirectJobStatus(String(id ?? '')),
   )
+  handle(ClientIpc.directJobDismiss, (id: unknown) =>
+    client.dismissDirectJob(String(id ?? '')),
+  )
 }
 
 function allWindows(): Electron.BrowserWindow[] {

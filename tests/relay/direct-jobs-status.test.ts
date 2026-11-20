@@ -69,6 +69,10 @@ describe('relay: on-demand direct-job sender status', () => {
       assert.equal(jobs[0]['state'], 'queued');
       assert.equal(jobs[0]['targetClientId'], receiverId);
       assert.deepEqual(jobs[0]['selection'], [0, 2]);
+      assert.equal(
+        jobs[0]['fromClientId'],
+        auth.listClients().find((c) => c.name === 'sender')!.clientId,
+      );
       assert.equal(typeof jobs[0]['sourcePreview'], 'string');
       assert.equal('source' in jobs[0], false);
 
@@ -116,6 +120,33 @@ describe('relay: on-demand direct-job sender status', () => {
         headers: { authorization: `Bearer ${senderToken}` },
       });
       assert.equal((sent2.json() as { jobs: Array<{ state: string }> }).jobs[0].state, 'accepted');
+
+      // Only the sender can dismiss the row from their own list.
+      const receiverDismiss = await app.inject({
+        method: 'POST',
+        url: `/v1/direct-jobs/${jobId}/dismiss`,
+        headers: { authorization: `Bearer ${receiverToken}` },
+      });
+      assert.equal(receiverDismiss.statusCode, 404);
+      const dismissed = await app.inject({
+        method: 'POST',
+        url: `/v1/direct-jobs/${jobId}/dismiss`,
+        headers: { authorization: `Bearer ${senderToken}` },
+      });
+      assert.equal(dismissed.statusCode, 200);
+      const sentAfterDismiss = await app.inject({
+        method: 'GET',
+        url: '/v1/direct-jobs/sent',
+        headers: { authorization: `Bearer ${senderToken}` },
+      });
+      assert.equal((sentAfterDismiss.json() as { jobs: unknown[] }).jobs.length, 0);
+      // Dismissing is a sender-side hide, not a receiver-side cancel.
+      const stillThere = await app.inject({
+        method: 'GET',
+        url: `/v1/direct-jobs/${jobId}`,
+        headers: { authorization: `Bearer ${receiverToken}` },
+      });
+      assert.equal(stillThere.statusCode, 200);
 
       // Unknown id is a clean 404.
       const missing = await app.inject({

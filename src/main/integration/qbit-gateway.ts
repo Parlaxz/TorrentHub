@@ -64,8 +64,13 @@ export class QbitTorrentGateway implements TorrentGateway {
 
   // ------------------------------------------------------------- metadata
 
-  async fetchMetadata(source: IntakeSource): Promise<TorrentMetadataInfo> {
-    const inspected = await this.qbit.inspectTorrent(source.value);
+  async fetchMetadata(
+    source: IntakeSource,
+    options?: { signal?: AbortSignal },
+  ): Promise<TorrentMetadataInfo> {
+    const inspected = await this.qbit.inspectTorrent(source.value, {
+      signal: options?.signal,
+    });
     this.tokensBySource.set(source.value, inspected.token);
     this.inspectedByToken.set(inspected.token, inspected);
     return toMetadataInfo(inspected);

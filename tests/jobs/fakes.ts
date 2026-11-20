@@ -52,6 +52,8 @@ export class FakeTorrentGateway implements TorrentGateway {
   script: TelemetrySample[];
   fetchMetadataError: Error | null = null;
   deleteOwnedShouldThrow: Error | null = null;
+  /** Test hook: delay the metadata response and honor an abort signal. */
+  metadataDelayMs = 0;
 
   fetchMetadataCount = 0;
   readonly addTorrentCalls: Array<{ source: IntakeSource; options: AddTorrentOptions }> = [];
@@ -64,8 +66,24 @@ export class FakeTorrentGateway implements TorrentGateway {
     this.script = script;
   }
 
-  async fetchMetadata(_source: IntakeSource): Promise<TorrentMetadataInfo> {
+  async fetchMetadata(
+    _source: IntakeSource,
+    options?: { signal?: AbortSignal },
+  ): Promise<TorrentMetadataInfo> {
     this.fetchMetadataCount += 1;
+    if (this.metadataDelayMs > 0) {
+      await new Promise<void>((resolve, reject) => {
+        const timer = setTimeout(resolve, this.metadataDelayMs);
+        options?.signal?.addEventListener(
+          'abort',
+          () => {
+            clearTimeout(timer);
+            reject(new Error('metadata fetch aborted'));
+          },
+          { once: true },
+        );
+      });
+    }
     if (this.fetchMetadataError) throw this.fetchMetadataError;
     return this.metadata;
   }

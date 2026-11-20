@@ -73,7 +73,7 @@ export function makeHarness(options: HarnessOptions = {}): Harness {
   };
 
   const trackedTorrent: TorrentGateway = {
-    fetchMetadata: (source) => torrent.fetchMetadata(source),
+    fetchMetadata: (source, options) => torrent.fetchMetadata(source, options),
     addTorrent: (source, opts) => torrent.addTorrent(source, opts),
     getProgress: (handle) => torrent.getProgress(handle),
     stop: (handle) => torrent.stop(handle),

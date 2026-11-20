@@ -120,15 +120,20 @@ export function HomeScreen({
     () =>
       (sent ?? []).filter(
         (item) =>
-          item.state === "queued" ||
-          (item.state === "accepted" && (item.progress?.progressPct ?? 0) < 100),
+          // Defensive: only rows this client sent, even if an old server
+          // returns a wider list.
+          (!connection?.clientId || item.fromClientId === connection.clientId) &&
+          (item.state === "queued" ||
+            (item.state === "accepted" && (item.progress?.progressPct ?? 0) < 100)),
       ),
-    [sent],
+    [sent, connection?.clientId],
   );
 
   const selectedJobs = downloads.filter((job) => selected.has(job.id));
-  const canOrder =
-    selectedJobs.length > 0 && selectedJobs.every((job) => job.state === "complete");
+  const orderable = (job: JobSnapshot): boolean =>
+    job.state === "queued" || job.state === "downloading" || job.state === "complete";
+  const canOrder = selectedJobs.length > 0 && selectedJobs.every(orderable);
+  const orderHasIncomplete = selectedJobs.some((job) => job.state !== "complete");
 
   const toggleSelected = (id: string): void => {
     setSelected((prev) => {
@@ -216,6 +221,17 @@ export function HomeScreen({
     }
   };
 
+  const dismissFriendDownload = async (id: string): Promise<void> => {
+    if (!bridge) return;
+    setActionError(null);
+    try {
+      await bridge.dismissDirectJob(id);
+      await reload();
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : "Could not dismiss that link.");
+    }
+  };
+
   const copy = async (text: string): Promise<void> => {
     if (bridge) await bridge.copyText(text).catch(() => false);
   };
@@ -280,17 +296,6 @@ export function HomeScreen({
           Downloads
         </SectionTitle>
 
-        {friendDownloads.length > 0 ? (
-          <div className="mb-4 space-y-2">
-            <h3 className="text-[11px] font-semibold uppercase tracking-widest text-zinc-400 dark:text-zinc-500">
-              From friends
-            </h3>
-            {friendDownloads.map((item) => (
-              <FriendDownloadRow key={item.id} item={item} />
-            ))}
-          </div>
-        ) : null}
-
         {downloads.length === 0 ? (
           friendDownloads.length === 0 ? (
             <EmptyState
@@ -319,6 +324,21 @@ export function HomeScreen({
           </div>
         )}
 
+        {friendDownloads.length > 0 ? (
+          <div className={`space-y-2${downloads.length > 0 ? " mt-4" : ""}`}>
+            <h3 className="text-[11px] font-semibold uppercase tracking-widest text-zinc-400 dark:text-zinc-500">
+              Sent to friends
+            </h3>
+            {friendDownloads.map((item) => (
+              <FriendDownloadRow
+                key={item.id}
+                item={item}
+                onDismiss={() => void dismissFriendDownload(item.id)}
+              />
+            ))}
+          </div>
+        ) : null}
+
         {selectedJobs.length > 0 ? (
           <div className="mt-3 flex flex-wrap items-center justify-end gap-2 border-t border-zinc-100 pt-3 dark:border-zinc-800">
             <Button variant="danger" onClick={() => void deleteSelected()} data-testid="delete-downloads">
@@ -327,7 +347,11 @@ export function HomeScreen({
             <Button
               onClick={() => setOrderIds(selectedJobs.map((job) => job.id))}
               disabled={!canOrder}
-              title={canOrder ? undefined : "Only finished downloads can go into an order."}
+              title={
+                canOrder
+                  ? undefined
+                  : "Failed, cancelled, or interrupted downloads cannot be ordered."
+              }
               data-testid="order-selected"
             >
               Add to Order
@@ -367,6 +391,7 @@ export function HomeScreen({
       <OrderConfirmModal
         open={orderIds !== null}
         jobIds={orderIds ?? []}
+        hasIncomplete={orderHasIncomplete}
         bridge={bridge}
         onClose={() => setOrderIds(null)}
         onDone={() => {
@@ -380,6 +405,7 @@ export function HomeScreen({
 }
 
 function stateLabel(job: JobSnapshot): string {
+  if (job.waitingForDownloads) return "Waiting for downloads";
   switch (job.state) {
     case "queued":
       return "Queued";
@@ -405,6 +431,7 @@ function stateLabel(job: JobSnapshot): string {
 }
 
 function toneFor(job: JobSnapshot): "neutral" | "green" | "amber" | "red" | "blue" {
+  if (job.waitingForDownloads) return "blue";
   if (job.state === "complete") return "green";
   if (job.state === "failed") return "red";
   if (job.state === "cancelled" || job.state === "interrupted") return "amber";
@@ -431,28 +458,36 @@ function DownloadRow({
   const name = job.metadata?.name ?? job.source.value;
   return (
     <div
-      className="rounded-md border border-zinc-200 px-2.5 py-2 dark:border-zinc-800"
+      onClick={onToggle}
+      className={`cursor-pointer rounded-md border px-2.5 py-2 transition-colors ${
+        checked
+          ? "border-blue-500 bg-blue-50/60 dark:border-blue-500 dark:bg-blue-950/20"
+          : "border-zinc-200 hover:border-zinc-300 dark:border-zinc-800 dark:hover:border-zinc-700"
+      }`}
       data-testid={`download-${job.id}`}
     >
+      <input
+        type="checkbox"
+        checked={checked}
+        onChange={onToggle}
+        aria-label={`Select ${name}`}
+        className="sr-only"
+      />
       <div className="flex items-center gap-2">
-        <input
-          type="checkbox"
-          checked={checked}
-          onChange={onToggle}
-          aria-label={`Select ${name}`}
-          className="h-3.5 w-3.5 shrink-0 accent-blue-600"
-        />
         <button
           type="button"
           className="min-w-0 flex-1 truncate text-left text-[13px] font-medium text-zinc-800 hover:underline dark:text-zinc-200"
           title={name}
-          onClick={onExpand}
+          onClick={(e) => {
+            e.stopPropagation();
+            onExpand();
+          }}
         >
           {name}
         </button>
         <Badge tone={toneFor(job)}>{stateLabel(job)}</Badge>
       </div>
-      <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 pl-5 text-[11px] tabular-nums text-zinc-500 dark:text-zinc-400">
+      <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] tabular-nums text-zinc-500 dark:text-zinc-400">
         {job.selectedBytes != null ? <span>{formatBytes(job.selectedBytes)}</span> : null}
         {t ? (
           <>
@@ -466,12 +501,12 @@ function DownloadRow({
         {job.error ? <span className="text-red-600 dark:text-red-400">{job.error.message}</span> : null}
       </div>
       {t ? (
-        <div className="mt-1.5 pl-5">
+        <div className="mt-1.5">
           <ProgressBar pct={t.progressPct} label={`${name} download progress`} />
         </div>
       ) : null}
       {expanded ? (
-        <div className="mt-3 border-t border-zinc-100 pt-3 dark:border-zinc-800">
+        <div className="mt-3 border-t border-zinc-100 pt-3 dark:border-zinc-800" onClick={(e) => e.stopPropagation()}>
           <JobDetail
             job={job}
             onCancel={bridge ? () => void bridge.cancelJob(job.id) : undefined}
@@ -485,7 +520,13 @@ function DownloadRow({
   );
 }
 
-function FriendDownloadRow({ item }: { item: SentDirectJobStatus }) {
+function FriendDownloadRow({
+  item,
+  onDismiss,
+}: {
+  item: SentDirectJobStatus;
+  onDismiss: () => void;
+}) {
   const pct = item.progress?.progressPct ?? null;
   return (
     <div
@@ -499,6 +540,16 @@ function FriendDownloadRow({ item }: { item: SentDirectJobStatus }) {
         <Badge tone={item.state === "accepted" ? "blue" : "neutral"}>
           {item.state === "queued" ? "Waiting for friend" : "Downloading on friend's PC"}
         </Badge>
+        <button
+          type="button"
+          aria-label={`Dismiss ${item.targetName} download`}
+          title="Dismiss from this list"
+          className="shrink-0 text-zinc-400 hover:text-red-500"
+          onClick={onDismiss}
+          data-testid={`dismiss-friend-download-${item.id}`}
+        >
+          ✕
+        </button>
       </div>
       {pct != null ? (
         <div className="mt-1.5">
@@ -615,6 +666,12 @@ function OrderRow({
       ) : null}
       {expanded ? (
         <div className="mt-3 border-t border-zinc-100 pt-3 dark:border-zinc-800">
+          {job.waitingForDownloads ? (
+            <p className="mb-3 text-xs text-blue-700 dark:text-blue-300">
+              Waiting for {job.bundleJobIds?.length ?? 0} source download
+              {(job.bundleJobIds?.length ?? 0) === 1 ? "" : "s"} to finish before packaging.
+            </p>
+          ) : null}
           {bundled.length > 0 ? (
             <div className="mb-3">
               <p className="mb-1 text-[11px] font-semibold uppercase tracking-widest text-zinc-400 dark:text-zinc-500">
@@ -622,8 +679,16 @@ function OrderRow({
               </p>
               <ul className="space-y-1 text-xs text-zinc-600 dark:text-zinc-300">
                 {bundled.map((source) => (
-                  <li key={source.id} className="truncate">
-                    {source.metadata?.name ?? source.source.value} · {stateLabel(source)}
+                  <li key={source.id}>
+                    <div className="truncate">
+                      {source.metadata?.name ?? source.source.value} · {stateLabel(source)}
+                    </div>
+                    {source.telemetry ? (
+                      <div className="tabular-nums text-[11px] text-zinc-500 dark:text-zinc-400">
+                        {formatPercent(source.telemetry.progressPct)} ·{" "}
+                        {formatSpeed(source.telemetry.speedBps)}
+                      </div>
+                    ) : null}
                   </li>
                 ))}
               </ul>
@@ -644,12 +709,14 @@ function OrderRow({
 function OrderConfirmModal({
   open,
   jobIds,
+  hasIncomplete,
   bridge,
   onClose,
   onDone,
 }: {
   open: boolean;
   jobIds: string[];
+  hasIncomplete: boolean;
   bridge: VikingBridge | null;
   onClose: () => void;
   onDone: () => void;
@@ -702,9 +769,11 @@ function OrderConfirmModal({
     <Modal open={open} onClose={onClose} title="Add to order" wide>
       <div className="space-y-4">
         <p className="text-sm text-zinc-600 dark:text-zinc-300">
-          {jobIds.length === 1
-            ? "1 finished download will be ordered. One file uploads directly; several files are packaged first."
-            : `${jobIds.length} finished downloads will be packaged into one ZIP and uploaded.`}{" "}
+          {hasIncomplete
+            ? "The order will queue now and start packaging when every selected download finishes."
+            : jobIds.length === 1
+              ? "1 finished download will be ordered. One file uploads directly; several files are packaged first."
+              : `${jobIds.length} finished downloads will be packaged into one ZIP and uploaded.`}{" "}
           Already-downloaded files are not downloaded again.
         </p>
 

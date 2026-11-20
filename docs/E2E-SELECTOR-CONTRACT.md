@@ -16,9 +16,11 @@ No decorative testids. Every mapping below is product-semantic.
 | `friend-rename-<clientId>`, `friend-rename-panel`, `friend-rename-input-<clientId>`, `friend-rename-save-<clientId>` | friend nickname editing |
 | `torrent-paste` | paste clipboard into the Home link input |
 | `send-to-friend-open`, `send-to-friend`, `no-friends` | selection page → Send to Friend modal |
-| `add-to-order`, `confirm-commit`, `add-to-downloads` | selection page actions and their confirm modal |
+| `add-to-order`, `confirm-commit` | order confirm modal |
+| `add-to-downloads` | starts a download immediately (no modal) |
 | `delete-downloads`, `order-selected` | downloads-list bulk actions |
 | `download-<jobId>`, `friend-download-<directJobId>`, `order-<jobId>` | Home list rows |
+| `dismiss-friend-download-<directJobId>` | sender hides one sent-to-friend row |
 | `dismiss-order-<jobId>`, `confirm-order`, `order-cleanup-*` | orders list + combined-order modal |
 | `pair-client`, `send-to-friend`, `open-settings`, `exit-button`, `exit-cancel`, `exit-confirm` | server dashboard |
 | `pairing-regenerate` | pairing modal |
@@ -53,6 +55,7 @@ No decorative testids. Every mapping below is product-semantic.
 | Telemetry | aria-label `speed`, `eta` |
 | Stage pipeline | aria-label `Transfer stages` |
 | Modal close | aria-label `Close dialog` / `Close settings` |
+| Download row selection | click the `download-<jobId>` row; the checkbox (aria-label `Select <name>`) is screen-reader/keyboard only |
 
 ## Rules for adding new testids
 

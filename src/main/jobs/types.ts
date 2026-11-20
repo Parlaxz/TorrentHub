@@ -191,6 +191,8 @@ export interface JobRecord {
   bundleEntries?: BundleEntry[] | null;
   /** Download jobs only: the order that consumed this download. */
   orderedByJobId?: string | null;
+  /** Bundle order only: waiting for its source downloads to finish. */
+  waitingForDownloads?: boolean;
   /**
    * Paired client that created this job's intake (tenant attribution).
    * null/undefined = server-local or pre-upgrade record: visible ONLY to the

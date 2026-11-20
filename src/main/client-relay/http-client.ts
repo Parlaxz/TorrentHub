@@ -101,6 +101,12 @@ export class RelayHttpClient {
         if (options.signal?.aborted) {
           throw new RelayClientError({ kind: 'timeout', message: 'request aborted' })
         }
+        if (controller.signal.aborted) {
+          throw new RelayClientError({
+            kind: 'timeout',
+            message: `server ${this.endpoint.host}:${this.endpoint.port} did not respond within ${timeoutMs}ms`,
+          })
+        }
         throw new RelayClientError({
           kind: 'unreachable',
           message: `server ${this.endpoint.host}:${this.endpoint.port} is unreachable`,

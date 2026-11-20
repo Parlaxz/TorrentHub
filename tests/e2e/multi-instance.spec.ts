@@ -196,12 +196,22 @@ test('MULTI-013: valid source sent to a friend shows a friend download row and l
   })
   await a.app.screenshot('multi-013-friend-download')
 
-  // Cross-layer truth: the direct job really reached the server queue.
-  await srv.app.waitFor('direct job recorded server-side', async () => {
-    const jobs = (await srv.app.serverBridge<Array<Record<string, unknown>>>('listDirectJobs()')) as Array<
-      Record<string, unknown>
-    >
-    return jobs.some((j) => j['source'] === E2E_MAGNET && j['targetClientId'] === bEntry.clientId)
+  // Cross-layer truth: the direct job is in the sender's own sent list.
+  await a.app.waitFor('direct job recorded for the sender', async () => {
+    const sent = (await a.app.clientBridge<Array<Record<string, unknown>>>(
+      'directJobsSent()'
+    )) as Array<Record<string, unknown>>
+    return sent.some(
+      (j) =>
+        j['targetClientId'] === bEntry.clientId &&
+        String(j['sourcePreview'] ?? '').includes('0123456789abcdef')
+    )
+  })
+
+  // The sender can hide their own row without touching the friend's queue.
+  await a.app.page.locator('[data-testid^="dismiss-friend-download-"]').first().click()
+  await a.app.waitFor('friend download row dismissed', async () => {
+    return (await a.app.page.locator('[data-testid^="friend-download-"]').count()) === 0
   })
 })
 

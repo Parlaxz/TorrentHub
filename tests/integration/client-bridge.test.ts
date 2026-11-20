@@ -112,9 +112,14 @@ describe('integration: client bridge over a real relay', () => {
       assert.ok(secrets.entries.has('client.bearerToken'));
       assert.equal('client.bearerToken' in settingsState, false);
 
-      // Intake → draft with metadata.
+      // Intake → draft with metadata. The create call returns immediately;
+      // the renderer polls the draft while qBittorrent fetches metadata.
       const { jobId } = await client.createIntake(MAGNET);
-      const draft = await client.getDraft(jobId);
+      let draft = await client.getDraft(jobId);
+      for (let i = 0; i < 200 && draft.state === 'reading_metadata'; i += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 10));
+        draft = await client.getDraft(jobId);
+      }
       assert.equal(draft.state, 'awaiting_selection');
       assert.equal(draft.metadata?.files.length, 2);
 

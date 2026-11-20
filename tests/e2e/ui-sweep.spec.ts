@@ -14,7 +14,7 @@ import { makeTempUserData } from './harness/paths'
 
 /**
  * UISWEEP lane - machine-readable interactive-control inventory per mounted
- * surface. Permanent IDs UISWEEP-001..013; never renumber.
+ * surface. Permanent IDs UISWEEP-001..014; never renumber.
  *
  * Gate: ZERO interactive controls (buttons/links/textboxes/searchboxes/
  * checkboxes/radios/comboboxes/switches) may have an EMPTY accessible name.
@@ -325,18 +325,13 @@ test('UISWEEP-013: a parked download can be ordered from the downloads list', as
   await app.page.getByRole('button', { name: 'Continue', exact: true }).click()
   await reachTree(app)
   await app.page.getByTestId('add-to-downloads').click()
-  await app.page.getByRole('dialog', { name: 'Add to downloads' }).waitFor({ state: 'visible', timeout: 10_000 })
-  await app.waitFor('download preflight verdict', async () => {
-    return (await app.page.getByText(/Enough storage/).count()) > 0
-  })
-  await app.page.getByTestId('confirm-commit').click()
 
   await app.waitFor('parked download finished', async () => {
     return (await app.page.getByText('Downloaded — waiting for order').count()) === 1
   }, { timeoutMs: 60_000 })
   await app.screenshot('client-download-parked')
 
-  await app.page.locator('[data-testid^="download-"] input[type="checkbox"]').first().check()
+  await app.page.locator('[data-testid^="download-"]').first().click()
   await app.page.getByTestId('order-selected').click()
   await app.page.getByRole('dialog', { name: 'Add to order' }).waitFor({ state: 'visible', timeout: 10_000 })
   await app.waitFor('order preflight verdict', async () => {
@@ -351,6 +346,51 @@ test('UISWEEP-013: a parked download can be ordered from the downloads list', as
 
   app.page.once('dialog', (dialog) => void dialog.accept())
   await app.page.locator('[data-testid^="dismiss-order-"]').first().click()
+})
+
+test('UISWEEP-014: an in-progress download can be queued into an order', async () => {
+  test.slow()
+  await startCluster('UISWEEP-014', { downloadTicks: 200 })
+  const app = client!.app
+
+  const input = app.page.getByRole('textbox', { name: 'Torrent magnet link or URL' })
+  await input.waitFor({ state: 'visible', timeout: 10_000 })
+  await input.fill(E2E_MAGNET)
+  await app.page.getByRole('button', { name: 'Continue', exact: true }).click()
+  await reachTree(app)
+  await app.page.getByTestId('add-to-downloads').click()
+
+  await app.waitFor('in-progress download row', async () => {
+    return (await app.page.locator('[data-testid^="download-"]').count()) === 1
+  }, { timeoutMs: 30_000 })
+  await app.waitFor('download is still in progress', async () => {
+    return (await app.page.getByText('Downloaded — waiting for order').count()) === 0
+  })
+
+  await app.page.locator('[data-testid^="download-"]').first().click()
+  await app.page.getByTestId('order-selected').click()
+  await app.page.getByRole('dialog', { name: 'Add to order' }).waitFor({ state: 'visible', timeout: 10_000 })
+  await app.waitFor('queue-now copy', async () => {
+    return (await app.page.getByText(/queue now/i).count()) > 0
+  })
+  await app.page.getByTestId('confirm-order').click()
+  await app.waitFor('order waiting for downloads', async () => {
+    return (await app.page.getByText('Waiting for downloads').count()) > 0
+  }, { timeoutMs: 30_000 })
+  await app.screenshot('client-order-waiting')
+
+  // Dismissing releases the source; then delete the in-flight download.
+  app.page.once('dialog', (dialog) => void dialog.accept())
+  await app.page.locator('[data-testid^="dismiss-order-"]').first().click()
+  await app.waitFor('order row removed', async () => {
+    return (await app.page.locator('[data-testid^="order-"]').count()) === 0
+  }, { timeoutMs: 20_000 })
+  await app.page.locator('[data-testid^="download-"]').first().click()
+  app.page.once('dialog', (dialog) => void dialog.accept())
+  await app.page.getByTestId('delete-downloads').click()
+  await app.waitFor('download row removed', async () => {
+    return (await app.page.locator('[data-testid^="download-"]').count()) === 0
+  }, { timeoutMs: 30_000 })
 })
 
 test('UISWEEP-007: client History screen control inventory', async () => {

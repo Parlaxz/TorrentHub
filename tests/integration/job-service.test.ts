@@ -73,11 +73,21 @@ async function setup(
 }
 
 describe('integration: A5 -> A6 job service', () => {
-  it('maps intake -> start -> get with a stripped public snapshot', async () => {
-    const world = await setup([{ downloadedBytes: 2000, selectedComplete: true }]);
-    const draft = await world.service.createIntake({
+  async function createDraft(world: Awaited<ReturnType<typeof setup>>) {
+    const created = await world.service.createIntake({
       source: { kind: 'magnet', value: MAGNET },
     });
+    for (let i = 0; i < 200; i += 1) {
+      const draft = await world.service.getIntake(created.id);
+      if (draft && draft.state !== 'reading_metadata') return draft;
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+    throw new Error('intake metadata did not settle');
+  }
+
+  it('maps intake -> start -> get with a stripped public snapshot', async () => {
+    const world = await setup([{ downloadedBytes: 2000, selectedComplete: true }]);
+    const draft = await createDraft(world);
     assert.equal(draft.state, 'awaiting_selection');
     assert.equal(draft.metadata?.files.length, 2);
 
@@ -125,9 +135,7 @@ describe('integration: A5 -> A6 job service', () => {
     // 2 × 600 MB selected => 1.2 GB peak; the fake gateway reports 1 GB free.
     const world = await setup([{ downloadedBytes: 0, selectedComplete: false }], {}, 600_000_000);
 
-    const draft = await world.service.createIntake({
-      source: { kind: 'magnet', value: MAGNET },
-    });
+    const draft = await createDraft(world);
     const response = await world.service.createJob({ intakeId: draft.id, selection: [0, 1] });
 
     assert.equal(response.state, 'awaiting_selection');
@@ -143,9 +151,7 @@ describe('integration: A5 -> A6 job service', () => {
 
     assert.equal(await world.service.getJob('does-not-exist'), null);
 
-    const draft = await world.service.createIntake({
-      source: { kind: 'magnet', value: MAGNET },
-    });
+    const draft = await createDraft(world);
     await assert.rejects(
       () => world.service.retryPackaging(draft.id),
       (error: { statusCode?: number; code?: string }) => {
@@ -166,9 +172,7 @@ describe('integration: A5 -> A6 job service', () => {
 
   it('cancels a draft and lists only terminal jobs in history', async () => {
     const world = await setup([{ downloadedBytes: 2000, selectedComplete: true }]);
-    const draft = await world.service.createIntake({
-      source: { kind: 'magnet', value: MAGNET },
-    });
+    const draft = await createDraft(world);
     const cancelled = await world.service.cancelJob(draft.id);
     assert.equal(cancelled.state, 'cancelled');
 
@@ -184,9 +188,7 @@ describe('integration: A5 -> A6 job service', () => {
       [{ downloadedBytes: 0, speedBps: 0, seeds: 0, peers: 0, selectedComplete: false }],
       { zeroSpeedMs: 10 },
     );
-    const draft = await world.service.createIntake({
-      source: { kind: 'magnet', value: MAGNET },
-    });
+    const draft = await createDraft(world);
     await world.service.createJob({ intakeId: draft.id, selection: [0] });
 
     // Let several polls run at sustained zero speed.

@@ -98,7 +98,7 @@ test('fetchMetadata polls 202 until metadata arrives', async () => {
   assert(registry.getIntake(inspected.token) !== undefined, 'intake registered');
 });
 
-test('fetchMetadata timeout raises MetadataUnavailableError', async () => {
+test('fetchMetadata waits until cancelled, with no timeout', async () => {
   const mock = createMockFetch((req) => {
     if (req.path === '/api/v2/app/webapiVersion') return textResponse('2.11.9');
     if (req.path === '/api/v2/app/version') return textResponse('v5.2.0');
@@ -107,10 +107,12 @@ test('fetchMetadata timeout raises MetadataUnavailableError', async () => {
   });
   const client = makeClient(mock.fetchImpl);
   const registry = new IntakeRegistry();
+  const controller = new AbortController();
+  setTimeout(() => controller.abort(), 30);
   await expectThrows(
     () =>
       inspectTorrent(client, registry, `magnet:?xt=urn:btih:${HASH}`, {
-        metadataTimeoutMs: 30,
+        signal: controller.signal,
         pollIntervalMs: 5,
       }),
     'METADATA_UNAVAILABLE',

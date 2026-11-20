@@ -38,6 +38,8 @@ export interface ConnectionStatus {
   state: ConnectionState;
   host?: string;
   port?: number;
+  /** This client's stable id on the server, when known. */
+  clientId?: string;
 }
 
 export interface PairParams {
@@ -60,6 +62,8 @@ export interface SentDirectJobStatus {
   id: string;
   targetClientId: string;
   targetName: string;
+  /** Sender client id (defensive scoping check in the renderer). */
+  fromClientId?: string;
   /** Short source label for the downloads list after a restart. */
   sourcePreview?: string | null;
   /** File indexes the sender picked; null = whole torrent. */
@@ -154,6 +158,8 @@ export interface VikingBridge {
   directJobsSent(): Promise<SentDirectJobStatus[]>;
   /** One-shot status check for a single sent link. */
   directJobStatus(id: string): Promise<SentDirectJobStatus>;
+  /** Hide a sent link from this client's list; the friend's queue is untouched. */
+  dismissDirectJob(id: string): Promise<void>;
 }
 
 /**

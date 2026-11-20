@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { initialStageMap, type JobRecord } from "../../src/main/jobs/index.ts";
 import { fakeMetadata } from "./fakes.ts";
-import { makeHarness } from "./harness.ts";
+import { makeHarness, waitFor } from "./harness.ts";
 
 const MAGNET = "magnet:?xt=urn:btih:abcdef";
 
@@ -101,4 +102,64 @@ test("dismiss archives an order", async () => {
 
   const dismissed = await h.engine.dismiss(order.id);
   assert.equal(dismissed.archived, true);
+});
+
+test("an order queues while its source download is still in progress", async () => {
+  const h = makeHarness({ metadata: fakeMetadata(1, 500) });
+  const now = new Date().toISOString();
+  const source: JobRecord = {
+    id: "dl-waiting",
+    createdAt: now,
+    updatedAt: now,
+    state: "queued",
+    source: { kind: "magnet", value: MAGNET },
+    goal: "download",
+    metadata: fakeMetadata(1, 500),
+    selection: [0],
+    selectedBytes: 500,
+    completedFiles: null,
+    stages: {
+      ...initialStageMap(),
+      metadata: "complete",
+      selection: "complete",
+      preflight: "complete",
+      download: "waiting",
+      packaging: "skipped",
+      upload: "skipped",
+      finalize: "skipped",
+      cleanup: "skipped",
+    },
+    sessionEpoch: h.engine.sessionEpoch,
+  };
+  await h.repo.upsert(source);
+
+  const preflight = await h.engine.preflightOrder([source.id]);
+  assert.equal(preflight.selectedFiles, 1);
+  assert.equal(preflight.blocked, false);
+
+  const order = await h.engine.createOrder([source.id], null, {
+    deleteTorrent: false,
+    deleteFiles: false,
+    deleteZip: true,
+  });
+  assert.equal((await h.engine.getJob(order.id)).waitingForDownloads, true);
+  assert.equal(h.viking.uploadCalls.length, 0, "no upload before the source finishes");
+
+  const finished = await h.engine.getJob(source.id);
+  finished.state = "complete";
+  finished.completedFiles = [
+    { index: 0, absolutePath: "/data/jobs/dl-waiting/download/folder/file0.bin" },
+  ];
+  await h.repo.upsert(finished);
+
+  // startupSweep also reconciles waiting orders.
+  await h.engine.startupSweep();
+  await waitFor(async () =>
+    (await h.engine.getJob(order.id)).state === "complete" ? true : null,
+  );
+
+  const done = await h.engine.getJob(order.id);
+  assert.equal(done.waitingForDownloads, false);
+  assert.equal(h.viking.uploadCalls.length, 1);
+  assert.equal(h.packaging.createZipCalls.length, 0, "single file uploads directly");
 });

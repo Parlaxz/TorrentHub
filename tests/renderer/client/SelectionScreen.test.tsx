@@ -89,6 +89,33 @@ describe("SelectionScreen", () => {
     await waitFor(() => expect(onDone).toHaveBeenCalledTimes(1));
   });
 
+  it("starts a download directly without a confirm modal", async () => {
+    const bridge = bridgeMock();
+    bridge.startJob.mockResolvedValue(undefined);
+    const onDone = vi.fn();
+
+    render(
+      <SelectionScreen
+        bridge={bridge}
+        draft={draft([
+          { index: 0, path: "a.bin", sizeBytes: 10 },
+          { index: 1, path: "b.bin", sizeBytes: 20 },
+        ])}
+        onDone={onDone}
+        onBack={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId("add-to-downloads"));
+
+    await waitFor(() =>
+      expect(bridge.startJob).toHaveBeenCalledWith("j9", { selection: [0, 1], goal: "download" }),
+    );
+    expect(bridge.preflightSelection).not.toHaveBeenCalled();
+    expect(screen.queryByRole("dialog")).toBeNull();
+    await waitFor(() => expect(onDone).toHaveBeenCalledTimes(1));
+  });
+
   it("shows the ZIP warning for 2+ selected files", () => {
     const bridge = bridgeMock();
     render(

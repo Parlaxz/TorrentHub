@@ -72,7 +72,10 @@ export interface TorrentHandle {
  */
 export interface TorrentGateway {
   /** Metadata only — does not add the torrent to the download queue. */
-  fetchMetadata(source: IntakeSource): Promise<TorrentMetadataInfo>;
+  fetchMetadata(
+    source: IntakeSource,
+    options?: { signal?: AbortSignal },
+  ): Promise<TorrentMetadataInfo>;
 
   addTorrent(source: IntakeSource, options: AddTorrentOptions): Promise<TorrentHandle>;
 

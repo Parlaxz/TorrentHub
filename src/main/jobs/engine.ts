@@ -50,6 +50,14 @@ export interface JobEngineDeps {
   repository: JobRepository;
 }
 
+interface BundleFile {
+  source: JobRecord;
+  index: number;
+  archiveRelativePath: string;
+  sizeBytes: number;
+  absoluteSourcePath: string | null;
+}
+
 export class JobEngine {
   readonly #deps: JobEngineDeps;
   readonly #config: JobEngineConfig;
@@ -61,6 +69,9 @@ export class JobEngine {
   #activePipeline: TransferPipeline | null = null;
   /** In-flight intake dedup for concurrent identical createIntake calls. */
   readonly #pendingIntakes = new Map<string, Promise<JobRecord>>();
+  /** Cancels the bounded metadata wait for a draft. */
+  readonly #metadataAborts = new Map<string, AbortController>();
+  #checkingPendingOrders = false;
 
   constructor(deps: JobEngineDeps, config: JobEngineConfig) {
     this.#deps = deps;
@@ -85,15 +96,30 @@ export class JobEngine {
     let marked = 0;
     for (const job of jobs) {
       if (isTerminalJobState(job.state)) continue;
+      if (job.sessionEpoch === this.#epoch) continue; // current-session job
+      // Metadata reads run in-memory only; a restart cannot resume one.
+      if (job.state === "reading_metadata") {
+        job.state = "failed";
+        job.stages.metadata = "failed";
+        job.error = {
+          kind: "metadata",
+          message: "server restarted while reading metadata; submit the link again",
+        };
+        await this.#save(job);
+        marked += 1;
+        continue;
+      }
       // Drafts that never started a transfer survive restarts untouched —
       // the user can still select files and start them.
-      if (job.state === "reading_metadata" || job.state === "awaiting_selection") continue;
-      if (job.sessionEpoch === this.#epoch) continue; // current-session job
+      if (job.state === "awaiting_selection") continue;
+      // Waiting orders are reconciled after the sweep (sources may resume/complete).
+      if (job.waitingForDownloads) continue;
       job.state = "interrupted";
       job.lastKnownStage = lastNonWaitingStage(job.stages);
       await this.#save(job);
       marked += 1;
     }
+    await this.#tryStartPendingOrders();
     return marked;
   }
 
@@ -108,6 +134,7 @@ export class JobEngine {
     sourceInput: string,
     idempotencyKey?: string | null,
     clientId?: string | null,
+    waitForMetadata = true,
   ): Promise<JobRecord> {
     const source = parseIntakeSource(sourceInput);
     const key = normalizeIdempotencyKey(idempotencyKey);
@@ -119,7 +146,7 @@ export class JobEngine {
       if (pending) return pending;
     }
 
-    const creation = this.#createIntakeInner(source, key, clientId ?? null);
+    const creation = this.#createIntakeInner(source, key, clientId ?? null, waitForMetadata);
     if (!key) return creation;
     this.#pendingIntakes.set(key, creation);
     try {
@@ -133,6 +160,7 @@ export class JobEngine {
     source: IntakeSource,
     key: string | null,
     clientId: string | null,
+    waitForMetadata: boolean,
   ): Promise<JobRecord> {
     const now = new Date().toISOString();
     const record: JobRecord = {
@@ -143,57 +171,70 @@ export class JobEngine {
       source,
       clientId,
       idempotencyKey: key,
-      stages: initialStageMap(),
+      stages: { ...initialStageMap(), metadata: "active" },
       metadata: null,
       result: null,
       error: null,
       sessionEpoch: this.#epoch,
     };
 
-    // Direct downloads need no torrent metadata: probe the URL for a
-    // filename + size and go straight to file selection.
-    if (source.kind === "direct") {
-      record.stages.metadata = "active";
-      await this.#save(record);
+    // The product path returns the draft immediately. Metadata can take
+    // minutes when a magnet has no seeds; blocking the create request made
+    // slow torrents look like an unreachable server at the client's 10s
+    // HTTP timeout. Direct engine callers/tests can keep the sync contract.
+    await this.#save(record);
+    const abort = new AbortController();
+    this.#metadataAborts.set(record.id, abort);
+    if (waitForMetadata) {
       try {
-        const probe = await this.#deps.direct.probe(source.value);
-        record.metadata = {
+        await this.#readMetadata(record, abort.signal);
+      } finally {
+        this.#metadataAborts.delete(record.id);
+      }
+      return (await this.#deps.repository.get(record.id)) ?? record;
+    }
+    void this.#readMetadata(record, abort.signal).finally(() => {
+      this.#metadataAborts.delete(record.id);
+    });
+    return record;
+  }
+
+  async #readMetadata(record: JobRecord, signal: AbortSignal): Promise<void> {
+    const jobId = record.id;
+    try {
+      let metadata: TorrentMetadataInfo;
+      if (record.source.kind === "direct") {
+        const probe = await this.#deps.direct.probe(record.source.value);
+        metadata = {
           name: probe.filename,
           files: [{ index: 0, path: probe.filename, sizeBytes: probe.sizeBytes }],
           totalSizeBytes: probe.sizeBytes,
         };
-        record.stages.metadata = "complete";
-        record.stages.selection = "waiting";
-        record.state = "awaiting_selection";
-      } catch (error) {
-        record.stages.metadata = "failed";
-        record.state = "failed";
-        record.error = { kind: "metadata", message: `direct link probe failed: ${String(error)}` };
+      } else {
+        metadata = await this.#deps.torrent.fetchMetadata(record.source, { signal });
       }
-      await this.#save(record);
-      return record;
-    }
-
-    record.stages.metadata = "active";
-    await this.#save(record);
-
-    try {
-      const metadata: TorrentMetadataInfo = await this.#deps.torrent.fetchMetadata(source);
-      if (record.state !== "reading_metadata") {
-        return record; // cancelled while metadata was in flight; keep that outcome
-      }
-      record.metadata = metadata;
-      record.stages.metadata = "complete";
-      record.stages.selection = "waiting";
-      record.state = "awaiting_selection";
+      // Re-read so a cancel/restart during the fetch is never overwritten.
+      const current = await this.#deps.repository.get(jobId).catch(() => null);
+      if (!current || current.state !== "reading_metadata") return;
+      current.metadata = metadata;
+      current.stages.metadata = "complete";
+      current.stages.selection = "waiting";
+      current.state = "awaiting_selection";
+      await this.#save(current);
     } catch (error) {
-      if (record.state !== "reading_metadata") return record;
-      record.stages.metadata = "failed";
-      record.state = "failed";
-      record.error = { kind: "metadata", message: `metadata fetch failed: ${String(error)}` };
+      const current = await this.#deps.repository.get(jobId).catch(() => null);
+      if (!current || current.state !== "reading_metadata") return;
+      current.stages.metadata = "failed";
+      current.state = "failed";
+      current.error = {
+        kind: "metadata",
+        message:
+          record.source.kind === "direct"
+            ? `direct link probe failed: ${String(error)}`
+            : `metadata fetch failed: ${String(error)}`,
+      };
+      await this.#save(current);
     }
-    await this.#save(record);
-    return record;
   }
 
   // ------------------------------------------------------------- commit
@@ -316,22 +357,27 @@ export class JobEngine {
   }
 
   /**
-   * Create an order from already-finished download-list jobs. The order skips
-   * the download stage and packages the selected files of every source into
-   * one ZIP, then uploads it.
+   * Create an order from downloads-list jobs. Completed sources are packaged
+   * immediately; still-downloading sources leave the order queued until they
+   * finish. The order skips its own download stage.
    */
   async createOrder(
     jobIds: string[],
     clientId: string | null = null,
     cleanupOverrides?: Partial<CleanupPolicy> | null,
   ): Promise<JobRecord> {
-    const { entries, sources, selectedBytes } = await this.#collectBundleEntries(jobIds);
+    const sources = await this.#validateBundleSources(jobIds);
+    const files = this.#bundleFiles(sources);
+    const selectedBytes = files.reduce((sum, file) => sum + file.sizeBytes, 0);
+    const allComplete =
+      sources.every((source) => source.state === "complete") &&
+      files.every((file) => file.absoluteSourcePath !== null);
     const id = newJobId();
-    const zipRequired = entries.length > 1;
+    const zipRequired = files.length > 1;
     const { view: preflight, storage } = await this.#computePreflight(
       id,
       selectedBytes,
-      entries.length,
+      files.length,
       zipRequired,
     );
     if (preflight.blocked) {
@@ -342,6 +388,7 @@ export class JobEngine {
       );
     }
 
+    const entries = allComplete ? this.#entriesFromFiles(files) : null;
     const now = new Date().toISOString();
     const record: JobRecord = {
       id,
@@ -354,25 +401,29 @@ export class JobEngine {
       },
       goal: "order",
       bundleJobIds: [...jobIds],
+      waitingForDownloads: !allComplete,
       bundleEntries: entries,
       clientId,
       metadata: {
         name: `Order ${now.slice(0, 16).replace("T", " ").replace(/:/g, "-")}`,
-        files: entries.map((e, index) => ({
+        files: files.map((file, index) => ({
           index,
-          path: e.archiveRelativePath,
-          sizeBytes: e.sizeBytes,
+          path: file.archiveRelativePath,
+          sizeBytes: file.sizeBytes,
         })),
         totalSizeBytes: selectedBytes,
       },
-      selection: entries.map((_, index) => index),
+      selection: files.map((_, index) => index),
       selectedBytes,
       zipRequired,
-      directSourcePath: zipRequired ? null : entries[0].absoluteSourcePath,
-      completedFiles: entries.map((e, index) => ({
-        index,
-        absolutePath: e.absoluteSourcePath,
-      })),
+      directSourcePath:
+        allComplete && !zipRequired ? (entries?.[0]?.absoluteSourcePath ?? null) : null,
+      completedFiles: entries
+        ? entries.map((entry, index) => ({
+            index,
+            absolutePath: entry.absoluteSourcePath,
+          }))
+        : null,
       stages: {
         ...initialStageMap(),
         metadata: "complete",
@@ -402,18 +453,20 @@ export class JobEngine {
       source.orderedByJobId = record.id;
       await this.#save(source);
     }
-    this.#startTransfer(record);
+    if (allComplete) this.#startTransfer(record);
     return record;
   }
 
   /** Storage check for a bundle order. No order is created. */
   async preflightOrder(jobIds: string[]): Promise<PreflightView> {
-    const { entries, selectedBytes } = await this.#collectBundleEntries(jobIds);
+    const sources = await this.#validateBundleSources(jobIds);
+    const files = this.#bundleFiles(sources);
+    const selectedBytes = files.reduce((sum, file) => sum + file.sizeBytes, 0);
     const { view } = await this.#computePreflight(
       "order-preflight",
       selectedBytes,
-      entries.length,
-      entries.length > 1,
+      files.length,
+      files.length > 1,
     );
     return view;
   }
@@ -443,6 +496,11 @@ export class JobEngine {
       return record;
     }
 
+    // A draft metadata fetch is a background poll; stop it explicitly.
+    if (record.state === "reading_metadata") {
+      this.#metadataAborts.get(jobId)?.abort();
+    }
+
     // No live pipeline bound to this job (draft states, or queued but not yet
     // picked up because another transfer is active).
     switch (record.state) {
@@ -452,6 +510,7 @@ export class JobEngine {
         record.state = "cancelled";
         await this.#releaseBundleSources(record);
         await this.#save(record);
+        await this.#tryStartPendingOrders();
         return record;
       default:
         throw new InvalidTransitionError(
@@ -637,13 +696,9 @@ export class JobEngine {
     return { view, storage };
   }
 
-  async #collectBundleEntries(jobIds: string[]): Promise<{
-    entries: BundleEntry[];
-    sources: JobRecord[];
-    selectedBytes: number;
-  }> {
+  async #validateBundleSources(jobIds: string[]): Promise<JobRecord[]> {
     if (jobIds.length === 0) {
-      throw new InvalidTransitionError("select at least one downloaded job");
+      throw new InvalidTransitionError("select at least one download");
     }
     const sources: JobRecord[] = [];
     for (const id of jobIds) {
@@ -651,8 +706,8 @@ export class JobEngine {
       if (source.goal !== "download") {
         throw new InvalidTransitionError(`${id} is not a downloads-list job`);
       }
-      if (source.state !== "complete") {
-        throw new InvalidTransitionError(`${id} has not finished downloading`);
+      if (!["queued", "downloading", "complete"].includes(source.state)) {
+        throw new InvalidTransitionError(`${id} is ${source.state} and cannot be ordered`);
       }
       if (source.orderedByJobId) {
         throw new InvalidTransitionError(`${id} is already in an order`);
@@ -660,15 +715,18 @@ export class JobEngine {
       if (source.archived) {
         throw new InvalidTransitionError(`${id} is archived`);
       }
-      if (!source.metadata || !source.selection || !source.completedFiles) {
-        throw new InvalidTransitionError(`${id} has no completed files`);
+      if (!source.metadata || !source.selection || source.selection.length === 0) {
+        throw new InvalidTransitionError(`${id} has no selection`);
       }
       sources.push(source);
     }
+    return sources;
+  }
 
+  /** Archive layout for every selected file, including ones not downloaded yet. */
+  #bundleFiles(sources: JobRecord[]): BundleFile[] {
     const usedRoots = new Set<string>();
-    const entries: BundleEntry[] = [];
-    let selectedBytes = 0;
+    const files: BundleFile[] = [];
     for (const source of sources) {
       const originalRoot = source.metadata!.name.replace(/\\/g, "/").replace(/\/+$/, "");
       const prefix = `${originalRoot}/`;
@@ -677,24 +735,122 @@ export class JobEngine {
       const meta = new Map(source.metadata!.files.map((f) => [f.index, f]));
       for (const index of source.selection!) {
         const file = meta.get(index);
-        const absolute = done.get(index);
-        if (!file || !absolute) continue;
+        if (!file) {
+          throw new InvalidTransitionError(
+            `missing metadata for ${source.id} file index ${index}`,
+          );
+        }
         const relative = file.path.startsWith(prefix)
           ? file.path.slice(prefix.length)
           : file.path;
-        entries.push({
-          absoluteSourcePath: absolute,
+        files.push({
+          source,
+          index,
           archiveRelativePath: `${root}/${relative}`,
           sizeBytes: file.sizeBytes,
-          torrentFileIndex: index,
+          absoluteSourcePath: done.get(index) ?? null,
         });
-        selectedBytes += file.sizeBytes;
       }
     }
-    if (entries.length === 0) {
-      throw new InvalidTransitionError("no completed files to order");
+    if (files.length === 0) {
+      throw new InvalidTransitionError("the selected downloads have no files");
     }
-    return { entries, sources, selectedBytes };
+    return files;
+  }
+
+  #entriesFromFiles(files: BundleFile[]): BundleEntry[] {
+    return files.map((file) => {
+      if (!file.absoluteSourcePath) {
+        throw new InvalidTransitionError(
+          `download ${file.source.id} is not complete yet`,
+        );
+      }
+      return {
+        absoluteSourcePath: file.absoluteSourcePath,
+        archiveRelativePath: file.archiveRelativePath,
+        sizeBytes: file.sizeBytes,
+        torrentFileIndex: file.index,
+      };
+    });
+  }
+
+  /** Start any waiting order whose source downloads have all finished. */
+  async #tryStartPendingOrders(): Promise<void> {
+    if (this.#checkingPendingOrders) return;
+    this.#checkingPendingOrders = true;
+    try {
+      const jobs = await this.#deps.repository.loadAll();
+      for (const order of jobs) {
+        if (
+          !order.waitingForDownloads ||
+          order.goal !== "order" ||
+          order.state !== "queued" ||
+          order.archived ||
+          !order.bundleJobIds?.length
+        ) {
+          continue;
+        }
+        const sources = await Promise.all(
+          order.bundleJobIds.map((id) => this.#deps.repository.get(id).catch(() => null)),
+        );
+        const missing = sources.find((source) => !source);
+        if (missing) {
+          await this.#failPendingOrder(order, "a source download no longer exists");
+          continue;
+        }
+        const live = sources as JobRecord[];
+        const broken = live.find(
+          (source) =>
+            source.archived ||
+            source.orderedByJobId !== order.id ||
+            ["failed", "cancelled", "interrupted"].includes(source.state),
+        );
+        if (broken) {
+          await this.#failPendingOrder(
+            order,
+            `source download ${broken.metadata?.name ?? broken.id} is ${broken.state}`,
+          );
+          continue;
+        }
+        if (!live.every((source) => source.state === "complete")) continue;
+
+        const current = await this.#require(order.id);
+        if (!current.waitingForDownloads || current.state !== "queued") continue;
+        let files: BundleFile[];
+        let entries: BundleEntry[];
+        try {
+          files = this.#bundleFiles(live);
+          entries = this.#entriesFromFiles(files);
+        } catch (error) {
+          await this.#failPendingOrder(
+            current,
+            error instanceof Error ? error.message : String(error),
+          );
+          continue;
+        }
+        current.bundleEntries = entries;
+        current.completedFiles = entries.map((entry, index) => ({
+          index,
+          absolutePath: entry.absoluteSourcePath,
+        }));
+        current.directSourcePath = current.zipRequired
+          ? null
+          : (entries[0]?.absoluteSourcePath ?? null);
+        current.waitingForDownloads = false;
+        current.state = "queued";
+        await this.#save(current);
+        this.#startTransfer(current);
+      }
+    } finally {
+      this.#checkingPendingOrders = false;
+    }
+  }
+
+  async #failPendingOrder(order: JobRecord, message: string): Promise<void> {
+    order.waitingForDownloads = false;
+    order.state = "failed";
+    order.error = { kind: "download", message: `order cannot start: ${message}` };
+    await this.#save(order);
   }
 
   /** Give the source downloads back to the downloads list. */
@@ -779,6 +935,7 @@ export class JobEngine {
     } finally {
       if (this.#activeTransferJobId === jobId) this.#activeTransferJobId = null;
       if (this.#activePipeline === pipeline) this.#activePipeline = null;
+      void this.#tryStartPendingOrders();
     }
   }
 

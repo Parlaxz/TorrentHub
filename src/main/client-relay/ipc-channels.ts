@@ -29,5 +29,6 @@ export const ClientIpc = {
   friendsRename: 'client:friendsRename',
   friendsRemove: 'client:friendsRemove',
   directJobsSent: 'client:directJobsSent',
-  directJobStatus: 'client:directJobStatus'
+  directJobStatus: 'client:directJobStatus',
+  directJobDismiss: 'client:directJobDismiss'
 } as const

@@ -34,8 +34,11 @@ import type {
 } from './types';
 
 export interface InspectOptions {
-  /** Max wall time to wait for metadata. Default 120000ms. */
-  metadataTimeoutMs?: number;
+  /**
+   * Cancel the wait without a timeout. Metadata can take minutes when a
+   * magnet has no seeds yet; the user cancels explicitly instead.
+   */
+  signal?: AbortSignal;
   /** Poll interval while waiting. Default 1000ms. */
   pollIntervalMs?: number;
   /**
@@ -45,7 +48,6 @@ export interface InspectOptions {
   intakeSavePath?: string;
 }
 
-export const DEFAULT_METADATA_TIMEOUT_MS = 120_000;
 export const DEFAULT_POLL_INTERVAL_MS = 1_000;
 
 export async function inspectTorrent(
@@ -90,20 +92,13 @@ async function inspectViaFetchMetadata(
   kind: 'magnet' | 'url',
   options: InspectOptions,
 ): Promise<IntakeRecord> {
-  const timeoutMs = options.metadataTimeoutMs ?? DEFAULT_METADATA_TIMEOUT_MS;
   const intervalMs = options.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS;
-  const deadline = Date.now() + timeoutMs;
 
   for (;;) {
+    throwIfAborted(options.signal, source);
     const result = await client.fetchMetadataOnce(source);
     if (result.state === 'ready') {
       return recordFromFetchMetadata(result.meta, source, kind);
-    }
-    if (Date.now() >= deadline) {
-      throw new MetadataUnavailableError(
-        `Timed out after ${timeoutMs}ms waiting for torrent metadata`,
-        { source },
-      );
     }
     await sleep(intervalMs);
   }
@@ -159,9 +154,7 @@ async function inspectViaParkedAdd(
   parsed: ReturnType<typeof parseTorrentSource>,
   options: InspectOptions,
 ): Promise<IntakeRecord> {
-  const timeoutMs = options.metadataTimeoutMs ?? DEFAULT_METADATA_TIMEOUT_MS;
   const intervalMs = options.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS;
-  const deadline = Date.now() + timeoutMs;
 
   // Kept dependency-free on purpose: the adapter never imports node builtins.
   if (!options.intakeSavePath) {
@@ -186,34 +179,21 @@ async function inspectViaParkedAdd(
   const startedAt = Math.floor(Date.now() / 1000) - 5;
   let torrent: QbitTorrentInfo | undefined;
 
-  while (Date.now() < deadline) {
+  for (;;) {
+    throwIfAborted(options.signal, parsed.raw);
     const candidates = await client.getTorrents();
     torrent = candidates.find((t) => matchesIntake(t, parsed));
     if (torrent && torrent.added_on >= startedAt - 30) break;
-    if (Date.now() >= deadline) break;
     await sleep(intervalMs);
-  }
-
-  if (!torrent) {
-    throw new MetadataUnavailableError(
-      `Timed out after ${timeoutMs}ms waiting for the intake torrent to appear in qBittorrent`,
-      { source: parsed.raw },
-    );
   }
 
   // Wait for metadata (files list becomes non-empty).
   let files: QbitTorrentFile[] = [];
-  while (Date.now() < deadline) {
+  for (;;) {
+    throwIfAborted(options.signal, parsed.raw);
     files = await client.getTorrentFiles(torrent.hash);
     if (files.length > 0) break;
     await sleep(intervalMs);
-  }
-
-  if (files.length === 0) {
-    throw new MetadataUnavailableError(
-      `Timed out after ${timeoutMs}ms waiting for torrent metadata`,
-      { source: parsed.raw, infoHash: torrent.hash },
-    );
   }
 
   const inspectedFiles: InspectedFile[] = files.map((f) => ({
@@ -265,4 +245,10 @@ function matchesIntake(
 
 export function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function throwIfAborted(signal: AbortSignal | undefined, source: string): void {
+  if (signal?.aborted) {
+    throw new MetadataUnavailableError('metadata inspection cancelled', { source });
+  }
 }

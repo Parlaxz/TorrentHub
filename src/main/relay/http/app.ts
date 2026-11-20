@@ -44,6 +44,7 @@ export interface RelayAppDeps {
       }>
     >;
     setState(id: string, state: "accepted" | "declined"): Promise<unknown>;
+    dismissBySender?(id: string, clientId: string): Promise<unknown>;
     sentBy?(clientId: string): Promise<
       Array<{
         id: string;

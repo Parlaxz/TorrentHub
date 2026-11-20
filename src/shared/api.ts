@@ -30,6 +30,8 @@ export const ApiRoutes = {
   directJobs: '/v1/direct-jobs',
   directJobsSent: '/v1/direct-jobs/sent',
   directJobById: (id: string): string => `/v1/direct-jobs/${encodeURIComponent(id)}`,
+  directJobDismiss: (id: string): string =>
+    `/v1/direct-jobs/${encodeURIComponent(id)}/dismiss`,
   directJobReport: (id: string): string => `/v1/direct-jobs/${encodeURIComponent(id)}/report`,
   directJobAction: (id: string, action: 'accept' | 'decline'): string =>
     `/v1/direct-jobs/${encodeURIComponent(id)}/${action}`
@@ -186,6 +188,8 @@ export const ServerStatusResponseSchema = z.object({
   server: z.object({ name: z.string(), version: z.string() }),
   transport: z.unknown().nullable(),
   pairedClients: z.number().int().min(0),
+  /** Authenticated caller, when the request is bearer-authenticated. */
+  clientId: z.string().min(1).optional(),
   time: z.string()
 })
 export type ServerStatusResponse = z.infer<typeof ServerStatusResponseSchema>

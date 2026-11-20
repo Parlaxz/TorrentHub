@@ -69,6 +69,7 @@ export class EngineJobService implements JobService {
       input.source.value,
       input.idempotencyKey ?? null,
       input.clientId ?? null,
+      false,
     );
     return toDraftView(record);
   }
@@ -336,6 +337,7 @@ function toPublicJob(record: JobRecord): PublicJobSnapshot {
     error: record.error ?? null,
     lastKnownStage: record.lastKnownStage ?? null,
     bundleJobIds: record.bundleJobIds ?? null,
+    waitingForDownloads: record.waitingForDownloads ?? false,
     orderedByJobId: record.orderedByJobId ?? null,
     archived: record.archived ?? false,
     storagePreflight: record.preflight ?? null,

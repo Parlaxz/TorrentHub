@@ -126,6 +126,8 @@ export interface JobRecord {
   goal?: JobGoal;
   /** Set on bundle orders: the download jobs folded into this order. */
   bundleJobIds?: string[] | null;
+  /** Bundle order is waiting for its source downloads to finish. */
+  waitingForDownloads?: boolean;
   /** Set on download jobs already folded into an order. */
   orderedByJobId?: string | null;
   archived?: boolean;

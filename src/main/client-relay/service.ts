@@ -25,6 +25,8 @@ export interface ConnectionStatus {
   state: ConnectionState
   host?: string
   port?: number
+  /** This client's stable id on the server (authenticated status probe). */
+  clientId?: string
 }
 
 /** Authoritative storage preflight (server-computed; renderer never does math). */
@@ -55,6 +57,8 @@ export interface SentDirectJobStatus {
   id: string
   targetClientId: string
   targetName: string
+  /** Sender client id (defensive scoping check in the renderer). */
+  fromClientId?: string
   /** Short source label for the downloads list after a restart. */
   sourcePreview?: string | null
   /** File indexes the sender picked; null = whole torrent. */
@@ -158,8 +162,13 @@ export class ClientRelayService {
       // AUTHENTICATED probe: public /v1/health never 401s, so a revoked token
       // would keep reporting "connected". /v1/server/status requires the
       // bearer token and is the truthful liveness+authorization check.
-      await this.client()!.serverStatus(this.token())
-      return { state: 'connected', host: conn.host, port: conn.port }
+      const status = await this.client()!.serverStatus(this.token())
+      return {
+        state: 'connected',
+        host: conn.host,
+        port: conn.port,
+        clientId: status.clientId,
+      }
     } catch {
       return {
         state: 'offline',
@@ -375,6 +384,11 @@ export class ClientRelayService {
   /** One-shot status check for a single sent link (the "ping"). */
   async getDirectJobStatus(id: string): Promise<SentDirectJobStatus> {
     return this.authed<SentDirectJobStatus>('GET', ApiRoutes.directJobById(id))
+  }
+
+  /** Hide a sent link from this client's list; the friend's queue is untouched. */
+  async dismissDirectJob(id: string): Promise<void> {
+    await this.authed('POST', ApiRoutes.directJobDismiss(encodeURIComponent(id)))
   }
 
   getFriends(): Friend[] {

@@ -106,6 +106,7 @@ const clientBridge = {
   friendsRemove: (clientId: string) => ipcRenderer.invoke(ClientIpc.friendsRemove, clientId),
   directJobsSent: () => ipcRenderer.invoke(ClientIpc.directJobsSent),
   directJobStatus: (id: string) => ipcRenderer.invoke(ClientIpc.directJobStatus, id),
+  dismissDirectJob: (id: string) => ipcRenderer.invoke(ClientIpc.directJobDismiss, id),
 
   readText: async (): Promise<string> => {
     try {

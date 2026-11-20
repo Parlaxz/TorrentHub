@@ -226,6 +226,8 @@ export const JobSnapshotSchema = z.object({
 
   /** Set on bundle orders: the download jobs folded into this order. */
   bundleJobIds: z.array(z.string().min(1)).nullable().optional(),
+  /** Bundle order is waiting for its source downloads to finish. */
+  waitingForDownloads: z.boolean().optional(),
   /** Set on download jobs already folded into an order. */
   orderedByJobId: z.string().min(1).nullable().optional(),
   archived: z.boolean().optional()

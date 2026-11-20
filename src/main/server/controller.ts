@@ -397,7 +397,10 @@ export class ServerController implements VikingRelayServerBridge {
     }>
   > {
     if (!this.#directJobs) return [];
-    return this.#directJobs.listAll();
+    const jobs = await this.#directJobs.listAll();
+    // The Dashboard's "Sent" list is the server operator's own sends, never
+    // client-to-client traffic.
+    return jobs.filter((job) => job.fromClientId === 'server');
   }
 
   async revokePairedClient(clientId: string): Promise<{ removed: boolean }> {
